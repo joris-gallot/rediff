@@ -170,14 +170,11 @@ impl DiffEditorView {
     /// Delete selected text if any, and position cursor at selection start
     fn delete_selection(&mut self) {
         if let Some(range) = self.get_selection_range() {
-            // Delete the selected text
             let len = range.end - range.start;
             self.editor.buffer.delete(range.start, len);
 
-            // Position cursor at start of deleted range
             self.editor.cursor.index = range.start;
 
-            // Clear selection
             self.clear_selection();
         }
     }
@@ -193,47 +190,39 @@ impl DiffEditorView {
     /// Cut selected text to clipboard (copy + delete)
     fn cut_selection(&mut self, cx: &mut Context<Self>) {
         if let Some(range) = self.get_selection_range() {
-            // Copy to clipboard
             let text = &self.editor.buffer.as_str()[range.clone()];
             cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()));
 
-            // Delete selection
             self.delete_selection();
         }
     }
 
     /// Paste clipboard content at cursor position
     fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
-        if let Some(clipboard_item) = cx.read_from_clipboard() {
-            if let Some(text) = clipboard_item.text() {
-                // Delete selection if any
-                self.delete_selection();
+        if let Some(clipboard_item) = cx.read_from_clipboard()
+            && let Some(text) = clipboard_item.text()
+        {
+            self.delete_selection();
 
-                // Insert clipboard text at cursor
-                let cursor_pos = self.editor.cursor.index;
-                self.editor.buffer.insert(cursor_pos, &text);
+            let cursor_pos = self.editor.cursor.index;
+            self.editor.buffer.insert(cursor_pos, &text);
 
-                // Move cursor to end of pasted text
-                self.editor.cursor.index = cursor_pos + text.len();
-            }
+            self.editor.cursor.index = cursor_pos + text.len();
         }
     }
 
     fn extend_selection_left(&mut self) {
-        // Initialize anchor if no selection exists or selection is collapsed
         if self.get_selection_range().is_none() {
             self.selection_start = Some(self.editor.cursor.index);
         }
 
-        // Move cursor left
         self.editor.cursor.move_left();
 
-        // Update selection end to new cursor position
+        // Update selection end to new cursor positio
         self.selection_end = Some(self.editor.cursor.index);
     }
 
     fn extend_selection_right(&mut self) {
-        // Initialize anchor if no selection exists or selection is collapsed
         if self.get_selection_range().is_none() {
             self.selection_start = Some(self.editor.cursor.index);
         }
@@ -243,7 +232,6 @@ impl DiffEditorView {
     }
 
     fn extend_selection_up(&mut self) {
-        // Initialize anchor if no selection exists or selection is collapsed
         if self.get_selection_range().is_none() {
             self.selection_start = Some(self.editor.cursor.index);
         }
@@ -253,7 +241,6 @@ impl DiffEditorView {
     }
 
     fn extend_selection_down(&mut self) {
-        // Initialize anchor if no selection exists or selection is collapsed
         if self.get_selection_range().is_none() {
             self.selection_start = Some(self.editor.cursor.index);
         }
@@ -357,7 +344,6 @@ impl DiffEditorView {
                 cx.notify();
             }
             "backspace" => {
-                // If there's a selection, delete it; otherwise backspace normally
                 if self.get_selection_range().is_some() {
                     self.delete_selection();
                 } else {
@@ -533,7 +519,6 @@ impl DiffEditorView {
         let config = &self.config;
         let selection = self.get_selection_range();
 
-        // Calculate line start indices
         let mut line_starts = vec![0];
         let mut pos = 0;
         for line in &lines {
@@ -553,7 +538,6 @@ impl DiffEditorView {
                 let line_start = line_starts[i];
                 let line_end = line_start + line.len();
 
-                // Check if line has selection
                 if let Some(ref sel) = selection {
                     if sel.start >= line_end || sel.end <= line_start {
                         // No selection on this line - render normally
