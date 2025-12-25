@@ -677,6 +677,7 @@ impl Render for DiffEditorView {
             .track_focus(&self.focus_handle)
             .size_full()
             .bg(white())
+            .pb_80()
             .text_size(px(config.font_size))
             .on_key_down(cx.listener(Self::on_key_down))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
