@@ -2,8 +2,8 @@ use crate::core::Editor;
 
 use gpui::{
     App, Context, Div, FocusHandle, Focusable, KeyDownEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Render, ScrollHandle, TextAlign, Window, black, div, opaque_grey,
-    prelude::*, px, rgb, white,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollHandle, TextAlign, Window, black,
+    div, opaque_grey, prelude::*, px, rgb, white,
 };
 
 const LINE_NUMBERS_WIDTH: f32 = 40.0;
@@ -104,7 +104,7 @@ impl DiffEditorView {
         (start, end)
     }
 
-    fn calculate_index_from_position(&self, mouse_pos: gpui::Point<gpui::Pixels>) -> usize {
+    fn calculate_index_from_position(&self, mouse_pos: Point<Pixels>) -> usize {
         let scroll_offset = self.scroll_handle.offset();
         let config = &self.config;
         let line_height_px = px(config.line_height());
@@ -165,6 +165,21 @@ impl DiffEditorView {
         self.selection_start = None;
         self.selection_end = None;
         self.is_selecting = false;
+    }
+
+    /// Delete selected text if any, and position cursor at selection start
+    fn delete_selection(&mut self) {
+        if let Some(range) = self.get_selection_range() {
+            // Delete the selected text
+            let len = range.end - range.start;
+            self.editor.buffer.delete(range.start, len);
+
+            // Position cursor at start of deleted range
+            self.editor.cursor.index = range.start;
+
+            // Clear selection
+            self.clear_selection();
+        }
     }
 
     fn extend_selection_left(&mut self) {
@@ -278,14 +293,21 @@ impl DiffEditorView {
 
         match event.keystroke.key.as_str() {
             "enter" => {
+                self.delete_selection();
                 self.editor.insert_char('\n');
                 cx.notify();
             }
             "backspace" => {
-                self.editor.backspace();
+                // If there's a selection, delete it; otherwise backspace normally
+                if self.get_selection_range().is_some() {
+                    self.delete_selection();
+                } else {
+                    self.editor.backspace();
+                }
                 cx.notify();
             }
             "space" => {
+                self.delete_selection();
                 self.editor.insert_char(' ');
                 cx.notify();
             }
@@ -373,6 +395,7 @@ impl DiffEditorView {
             }
             key => {
                 if let Some(ch) = key.chars().next() {
+                    self.delete_selection();
                     self.editor.insert_char(ch);
                     cx.notify();
                 }
