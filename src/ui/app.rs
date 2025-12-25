@@ -1,8 +1,9 @@
 use crate::core::Editor;
 
 use gpui::{
-    App, Context, Div, FocusHandle, Focusable, KeyDownEvent, MouseButton, MouseDownEvent, Render,
-    ScrollHandle, TextAlign, Window, black, div, opaque_grey, prelude::*, px, white,
+    App, Context, Div, FocusHandle, Focusable, KeyDownEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Render, ScrollHandle, TextAlign, Window, black, div, opaque_grey,
+    prelude::*, px, rgb, white,
 };
 
 const LINE_NUMBERS_WIDTH: f32 = 40.0;
@@ -34,6 +35,10 @@ pub struct EditorView {
     focus_handle: FocusHandle,
     config: EditorConfig,
     scroll_handle: ScrollHandle,
+
+    is_selecting: bool,
+    selection_start: Option<usize>,
+    selection_end: Option<usize>,
 }
 
 impl EditorView {
@@ -45,6 +50,9 @@ impl EditorView {
             focus_handle,
             config: config.unwrap_or_default(),
             scroll_handle: ScrollHandle::new(),
+            is_selecting: false,
+            selection_start: None,
+            selection_end: None,
         }
     }
 
@@ -56,6 +64,85 @@ impl EditorView {
             .map(|pos| cursor_index - pos - 1)
             .unwrap_or(cursor_index);
         (line, col)
+    }
+
+    fn get_selection_range(&self) -> Option<std::ops::Range<usize>> {
+        match (self.selection_start, self.selection_end) {
+            (Some(start), Some(end)) if start != end => Some(start.min(end)..start.max(end)),
+            _ => None,
+        }
+    }
+
+    fn select_word_at(&self, index: usize) -> (usize, usize) {
+        let text = self.editor.buffer.as_str();
+
+        let start = text[..index]
+            .rfind(|c: char| !c.is_alphanumeric() && c != '_')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+
+        let end = text[index..]
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .map(|i| index + i)
+            .unwrap_or(text.len());
+
+        (start, end)
+    }
+
+    fn select_line_at(&self, index: usize) -> (usize, usize) {
+        let (line, _col) = self.editor.buffer.char_to_line_col(index);
+
+        let start = self.editor.buffer.line_col_to_char(line, 0);
+
+        let end = if line + 1 < self.editor.buffer.line_count() {
+            self.editor.buffer.line_col_to_char(line + 1, 0)
+        } else {
+            self.editor.buffer.len()
+        };
+
+        (start, end)
+    }
+
+    fn calculate_index_from_position(&self, mouse_pos: gpui::Point<gpui::Pixels>) -> usize {
+        let scroll_offset = self.scroll_handle.offset();
+        let config = &self.config;
+        let line_height_px = px(config.line_height());
+        let line_numbers_width_px = px(LINE_NUMBERS_WIDTH);
+        let padding_px = px(EDITOR_PADDING);
+
+        let adjusted_y = mouse_pos.y - scroll_offset.y;
+        let clicked_line = (adjusted_y / line_height_px).max(0.0) as usize;
+
+        let x_offset = mouse_pos.x - line_numbers_width_px - padding_px;
+        let char_width_px = px(config.font_size * 0.6);
+        let clicked_col_f32: f32 = x_offset / char_width_px;
+
+        let clicked_col = if clicked_col_f32.fract() >= 0.3 {
+            clicked_col_f32.ceil() as usize
+        } else {
+            clicked_col_f32.floor() as usize
+        };
+
+        let text = self.editor.buffer.as_str();
+        let lines: Vec<&str> = text.split('\n').collect();
+
+        if clicked_line >= lines.len() {
+            return text.len();
+        }
+
+        let col = clicked_col.min(lines[clicked_line].len());
+
+        let mut index = 0;
+        for (i, line) in lines.iter().enumerate() {
+            if i < clicked_line {
+                index += line.len() + 1;
+            } else if i == clicked_line {
+                index += col;
+                break;
+            }
+        }
+
+        index.min(text.len())
     }
 
     fn on_key_down(
@@ -108,51 +195,61 @@ impl EditorView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let mouse_pos = event.position;
-        let scroll_offset = self.scroll_handle.offset();
+        let index = self.calculate_index_from_position(event.position);
 
-        let config = &self.config;
-        let line_height_px = px(config.line_height());
-        let line_numbers_width_px = px(LINE_NUMBERS_WIDTH);
-        let padding_px = px(EDITOR_PADDING);
-
-        let adjusted_y = mouse_pos.y - scroll_offset.y;
-
-        let clicked_line = (adjusted_y / line_height_px) as usize;
-
-        let x_offset = mouse_pos.x - line_numbers_width_px - padding_px;
-        let char_width_px = px(config.font_size * 0.6);
-
-        let clicked_col_f32: f32 = x_offset / char_width_px;
-
-        // Implementing custom rounding: if the fractional part is >= 0.3, round up; else round down
-        let clicked_col = if clicked_col_f32.fract() >= 0.3 {
-            clicked_col_f32.ceil() as usize
-        } else {
-            clicked_col_f32.floor() as usize
-        };
-
-        let text = self.editor.buffer.as_str();
-        let lines: Vec<&str> = text.split('\n').collect();
-
-        if clicked_line >= lines.len() {
-            return;
-        }
-
-        let col = clicked_col.min(lines[clicked_line].len());
-
-        let mut index = 0;
-        for (i, line) in lines.iter().enumerate() {
-            if i < clicked_line {
-                index += line.len() + 1;
-            } else if i == clicked_line {
-                index += col;
-                break;
+        match event.click_count {
+            1 => {
+                self.is_selecting = true;
+                self.selection_start = Some(index);
+                self.selection_end = Some(index);
+                self.editor.cursor.index = index;
             }
+            2 => {
+                let (start, end) = self.select_word_at(index);
+                self.selection_start = Some(start);
+                self.selection_end = Some(end);
+                self.editor.cursor.index = end;
+                self.is_selecting = false;
+            }
+            3 => {
+                let (start, end) = self.select_line_at(index);
+                self.selection_start = Some(start);
+                self.selection_end = Some(end);
+                self.editor.cursor.index = end;
+                self.is_selecting = false;
+            }
+            _ => {}
         }
 
-        self.editor.cursor.index = index.min(text.len());
+        cx.notify();
+    }
 
+    fn on_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.is_selecting || event.pressed_button == Some(MouseButton::Left) {
+            let index = self.calculate_index_from_position(event.position);
+            self.selection_end = Some(index);
+            self.editor.cursor.index = index;
+            cx.notify();
+        }
+    }
+
+    fn on_mouse_up(&mut self, _event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        self.is_selecting = false;
+        cx.notify();
+    }
+
+    fn on_mouse_up_out(
+        &mut self,
+        _event: &MouseUpEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.is_selecting = false;
         cx.notify();
     }
 
@@ -161,6 +258,15 @@ impl EditorView {
         let (cursor_line, cursor_col) = Self::get_cursor_position(&text, cursor_index);
         let lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();
         let config = &self.config;
+        let selection = self.get_selection_range();
+
+        // Calculate line start indices
+        let mut line_starts = vec![0];
+        let mut pos = 0;
+        for line in &lines {
+            pos += line.len() + 1; // +1 for \n
+            line_starts.push(pos);
+        }
 
         div()
             .flex()
@@ -171,21 +277,113 @@ impl EditorView {
             .bg(white())
             .font_family("monospace")
             .children(lines.into_iter().enumerate().map(|(i, line)| {
-                if i == cursor_line {
-                    let before = line[..cursor_col.min(line.len())].to_string();
-                    let after = line[cursor_col.min(line.len())..].to_string();
+                let line_start = line_starts[i];
+                let line_end = line_start + line.len();
 
-                    div()
-                        .flex()
-                        .flex_row()
-                        .line_height(px(config.line_height()))
-                        .child(before)
-                        .child(div().w(px(2.0)).h(px(config.cursor_height())).bg(black()))
-                        .child(after)
+                // Check if line has selection
+                if let Some(ref sel) = selection {
+                    if sel.start >= line_end || sel.end <= line_start {
+                        // No selection on this line - render normally
+                        if i == cursor_line {
+                            let before = line[..cursor_col.min(line.len())].to_string();
+                            let after = line[cursor_col.min(line.len())..].to_string();
+
+                            div()
+                                .flex()
+                                .flex_row()
+                                .line_height(px(config.line_height()))
+                                .child(before)
+                                .child(div().w(px(2.0)).h(px(config.cursor_height())).bg(black()))
+                                .child(after)
+                        } else {
+                            div()
+                                .line_height(px(config.line_height()))
+                                .child(line.to_string())
+                        }
+                    } else {
+                        // Line has selection
+                        let sel_start_in_line =
+                            sel.start.saturating_sub(line_start).min(line.len());
+                        let sel_end_in_line = sel.end.saturating_sub(line_start).min(line.len());
+
+                        let before_sel = line[..sel_start_in_line].to_string();
+                        let selected = line[sel_start_in_line..sel_end_in_line].to_string();
+                        let after_sel = line[sel_end_in_line..].to_string();
+
+                        let mut row = div()
+                            .flex()
+                            .flex_row()
+                            .line_height(px(config.line_height()));
+
+                        if !before_sel.is_empty() {
+                            row = row.child(before_sel);
+                        }
+
+                        // Always render selection background, even for empty lines
+                        if !selected.is_empty() {
+                            row = row
+                                .child(div().bg(rgb(0x0078D4)).text_color(white()).child(selected));
+                        } else if sel_start_in_line < sel_end_in_line
+                            || (line.is_empty() && sel_start_in_line == 0)
+                        {
+                            // Empty line or empty selection - render space with background to maintain line height
+                            row = row.child(div().bg(rgb(0x0078D4)).text_color(white()).child(" "));
+                        }
+
+                        if i == cursor_line {
+                            let cursor_pos_in_line = cursor_col.min(line.len());
+                            if cursor_pos_in_line >= sel_start_in_line
+                                && cursor_pos_in_line <= sel_end_in_line
+                            {
+                                // Cursor is in selection
+                                row = row.child(
+                                    div().w(px(2.0)).h(px(config.cursor_height())).bg(white()),
+                                );
+                            } else if cursor_pos_in_line > sel_end_in_line {
+                                // Cursor is after selection
+                                let cursor_offset = cursor_pos_in_line
+                                    .saturating_sub(sel_end_in_line)
+                                    .min(after_sel.len());
+                                let before_cursor = after_sel[..cursor_offset].to_string();
+                                let after_cursor = after_sel[cursor_offset..].to_string();
+
+                                if !before_cursor.is_empty() {
+                                    row = row.child(before_cursor);
+                                }
+                                row = row.child(
+                                    div().w(px(2.0)).h(px(config.cursor_height())).bg(black()),
+                                );
+                                if !after_cursor.is_empty() {
+                                    row = row.child(after_cursor);
+                                }
+                                return row;
+                            }
+                        }
+
+                        if !after_sel.is_empty() {
+                            row = row.child(after_sel);
+                        }
+
+                        row
+                    }
                 } else {
-                    div()
-                        .line_height(px(config.line_height()))
-                        .child(line.to_string())
+                    // No selection at all
+                    if i == cursor_line {
+                        let before = line[..cursor_col.min(line.len())].to_string();
+                        let after = line[cursor_col.min(line.len())..].to_string();
+
+                        div()
+                            .flex()
+                            .flex_row()
+                            .line_height(px(config.line_height()))
+                            .child(before)
+                            .child(div().w(px(2.0)).h(px(config.cursor_height())).bg(black()))
+                            .child(after)
+                    } else {
+                        div()
+                            .line_height(px(config.line_height()))
+                            .child(line.to_string())
+                    }
                 }
             }))
     }
@@ -214,6 +412,9 @@ impl Render for EditorView {
             .text_size(px(config.font_size))
             .on_key_down(cx.listener(Self::on_key_down))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .on_mouse_move(cx.listener(Self::on_mouse_move))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up_out))
             .child(
                 div()
                     .flex()
