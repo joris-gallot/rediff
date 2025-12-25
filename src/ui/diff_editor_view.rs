@@ -248,6 +248,24 @@ impl DiffEditorView {
         self.selection_end = Some(self.editor.cursor.index);
     }
 
+    fn extend_selection_word_left(&mut self) {
+        if self.get_selection_range().is_none() {
+            self.selection_start = Some(self.editor.cursor.index);
+        }
+
+        self.editor.cursor.move_word_left(&self.editor.buffer);
+        self.selection_end = Some(self.editor.cursor.index);
+    }
+
+    fn extend_selection_word_right(&mut self) {
+        if self.get_selection_range().is_none() {
+            self.selection_start = Some(self.editor.cursor.index);
+        }
+
+        self.editor.cursor.move_word_right(&self.editor.buffer);
+        self.selection_end = Some(self.editor.cursor.index);
+    }
+
     fn on_key_down(
         self: &mut DiffEditorView,
         event: &KeyDownEvent,
@@ -256,6 +274,7 @@ impl DiffEditorView {
     ) {
         let shift_pressed = event.keystroke.modifiers.shift;
         let cmd_pressed = event.keystroke.modifiers.platform;
+        let opt_pressed = event.keystroke.modifiers.alt;
 
         match event.keystroke.key.as_str() {
             "enter" => {
@@ -276,6 +295,13 @@ impl DiffEditorView {
                 } else if cmd_pressed {
                     self.clear_selection();
                     self.editor.cursor.move_to_buffer_start();
+                } else if opt_pressed && shift_pressed {
+                    // Option+Shift+Up = same as Shift+Up
+                    self.extend_selection_up();
+                } else if opt_pressed {
+                    // Option+Up = same as Up
+                    self.clear_selection();
+                    self.editor.cursor.move_up(&self.editor.buffer);
                 } else if shift_pressed {
                     self.extend_selection_up();
                 } else {
@@ -292,6 +318,13 @@ impl DiffEditorView {
                     self.editor
                         .cursor
                         .move_to_buffer_end(self.editor.buffer.len());
+                } else if opt_pressed && shift_pressed {
+                    // Option+Shift+Down = same as Shift+Down
+                    self.extend_selection_down();
+                } else if opt_pressed {
+                    // Option+Down = same as Down
+                    self.clear_selection();
+                    self.editor.cursor.move_down(&self.editor.buffer);
                 } else if shift_pressed {
                     self.extend_selection_down();
                 } else {
@@ -306,6 +339,11 @@ impl DiffEditorView {
                 } else if cmd_pressed {
                     self.clear_selection();
                     self.editor.cursor.move_to_line_start(&self.editor.buffer);
+                } else if opt_pressed && shift_pressed {
+                    self.extend_selection_word_left();
+                } else if opt_pressed {
+                    self.clear_selection();
+                    self.editor.cursor.move_word_left(&self.editor.buffer);
                 } else if shift_pressed {
                     self.extend_selection_left();
                 } else {
@@ -320,6 +358,11 @@ impl DiffEditorView {
                 } else if cmd_pressed {
                     self.clear_selection();
                     self.editor.cursor.move_to_line_end(&self.editor.buffer);
+                } else if opt_pressed && shift_pressed {
+                    self.extend_selection_word_right();
+                } else if opt_pressed {
+                    self.clear_selection();
+                    self.editor.cursor.move_word_right(&self.editor.buffer);
                 } else if shift_pressed {
                     self.extend_selection_right();
                 } else {

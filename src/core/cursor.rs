@@ -74,6 +74,78 @@ impl Cursor {
     pub fn move_to_buffer_end(&mut self, buffer_len: usize) {
         self.index = buffer_len;
     }
+
+    /// Move to previous word boundary (stop at each transition)
+    pub fn move_word_left(&mut self, buffer: &TextBuffer) {
+        if self.index == 0 {
+            return;
+        }
+
+        let text = buffer.as_str();
+
+        // Get character type at current position (or before if at boundary)
+        let current_pos = if self.index > 0 { self.index - 1 } else { 0 };
+        let current_char = text.chars().nth(current_pos).unwrap();
+        let current_is_word = Self::is_word_char(current_char);
+
+        let mut index = self.index;
+
+        // Move backwards while we're in the same character type
+        while index > 0 {
+            let ch = text.chars().nth(index - 1).unwrap();
+            let is_word = Self::is_word_char(ch);
+
+            if is_word != current_is_word {
+                // Found a boundary
+                break;
+            }
+
+            index -= 1;
+        }
+
+        self.index = index;
+    }
+
+    /// Move to next word boundary (stop at each transition)
+    pub fn move_word_right(&mut self, buffer: &TextBuffer) {
+        let text = buffer.as_str();
+        let text_len = text.len();
+
+        if self.index >= text_len {
+            return;
+        }
+
+        // Get character type at current position
+        let current_char = text.chars().nth(self.index).unwrap();
+        let current_is_word = Self::is_word_char(current_char);
+
+        let mut index = self.index;
+
+        // Move forward while we're in the same character type
+        while index < text_len {
+            let ch = text.chars().nth(index).unwrap();
+            let is_word = Self::is_word_char(ch);
+
+            if is_word != current_is_word {
+                // Found a boundary
+                break;
+            }
+
+            index += 1;
+        }
+
+        self.index = index;
+    }
+
+    /// Determines if a character is a word character.
+    ///
+    /// Word characters: alphanumeric (a-z, A-Z, 0-9) and underscore (_)
+    /// Non-word characters: everything else (spaces, punctuation, newlines, etc.)
+    ///
+    /// This can be easily modified to change word boundary behavior.
+    pub fn is_word_char(ch: char) -> bool {
+        ch.is_alphanumeric() || ch == '_'
+    }
 }
 
 #[cfg(test)]
@@ -322,5 +394,178 @@ mod tests {
 
         cursor.move_to_line_end(&buffer);
         assert_eq!(cursor.index, 6); // stays at same position (line is empty)
+    }
+
+    #[test]
+    fn test_move_word_right_simple() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "hello world");
+        let mut cursor = Cursor { index: 0 };
+
+        // From start of "hello" to end of "hello"
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 5);
+
+        // From end of "hello" (space) to end of space
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 6);
+
+        // From start of "world" to end of "world"
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 11);
+    }
+
+    #[test]
+    fn test_move_word_left_simple() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "hello world");
+        let mut cursor = Cursor { index: 11 }; // End of "world"
+
+        // From end of "world" to start of "world"
+        cursor.move_word_left(&buffer);
+        assert_eq!(cursor.index, 6);
+
+        // From start of "world" (was space) to start of space
+        cursor.move_word_left(&buffer);
+        assert_eq!(cursor.index, 5);
+
+        // From end of "hello" to start of "hello"
+        cursor.move_word_left(&buffer);
+        assert_eq!(cursor.index, 0);
+    }
+
+    #[test]
+    fn test_move_word_right_with_punctuation() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "hello.world");
+        let mut cursor = Cursor { index: 0 };
+
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 5); // End of "hello"
+
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 6); // End of "."
+
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 11); // End of "world"
+    }
+
+    #[test]
+    fn test_move_word_right_multiple_spaces() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "hello   world");
+        let mut cursor = Cursor { index: 0 };
+
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 5); // End of "hello"
+
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 8); // End of "   " (all spaces are one segment)
+
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 13); // End of "world"
+    }
+
+    #[test]
+    fn test_word_movement_example() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "Word Movement Examples");
+        let mut cursor = Cursor { index: 0 };
+
+        // Position 0 -> 4 (end of "Word")
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 4);
+
+        // Position 4 -> 5 (end of space)
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 5);
+
+        // Position 5 -> 13 (end of "Movement")
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 13);
+
+        // Now go back
+        // Position 13 -> 5 (start of "Movement")
+        cursor.move_word_left(&buffer);
+        assert_eq!(cursor.index, 5);
+
+        // Position 5 -> 4 (start of space)
+        cursor.move_word_left(&buffer);
+        assert_eq!(cursor.index, 4);
+
+        // Position 4 -> 0 (start of "Word")
+        cursor.move_word_left(&buffer);
+        assert_eq!(cursor.index, 0);
+    }
+
+    #[test]
+    fn test_is_word_char() {
+        assert!(Cursor::is_word_char('a'));
+        assert!(Cursor::is_word_char('Z'));
+        assert!(Cursor::is_word_char('0'));
+        assert!(Cursor::is_word_char('_'));
+
+        assert!(!Cursor::is_word_char(' '));
+        assert!(!Cursor::is_word_char('.'));
+        assert!(!Cursor::is_word_char('-'));
+        assert!(!Cursor::is_word_char('\n'));
+    }
+
+    #[test]
+    fn test_move_word_boundaries_underscore() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "foo_bar");
+        let mut cursor = Cursor { index: 0 };
+
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 7); // "foo_bar" is one word (underscore is word char)
+    }
+
+    #[test]
+    fn test_move_word_at_boundaries() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "hello world");
+        let mut cursor = Cursor { index: 0 };
+
+        // At start
+        cursor.move_word_left(&buffer);
+        assert_eq!(cursor.index, 0); // Stay at start
+
+        // At end
+        cursor.index = 11;
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 11); // Stay at end
+    }
+
+    #[test]
+    fn test_move_word_with_newlines() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "hello\nworld");
+        let mut cursor = Cursor { index: 0 };
+
+        // 0 -> 5 (end of "hello")
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 5);
+
+        // 5 -> 6 (end of "\n")
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 6);
+
+        // 6 -> 11 (end of "world")
+        cursor.move_word_right(&buffer);
+        assert_eq!(cursor.index, 11);
+
+        // Now go back
+        // 11 -> 6 (start of "world")
+        cursor.move_word_left(&buffer);
+        assert_eq!(cursor.index, 6);
+
+        // 6 -> 5 (start of "\n")
+        cursor.move_word_left(&buffer);
+        assert_eq!(cursor.index, 5);
+
+        // 5 -> 0 (start of "hello")
+        cursor.move_word_left(&buffer);
+        assert_eq!(cursor.index, 0);
     }
 }
