@@ -182,6 +182,43 @@ impl DiffEditorView {
         }
     }
 
+    /// Copy selected text to clipboard
+    fn copy_selection(&mut self, cx: &mut Context<Self>) {
+        if let Some(range) = self.get_selection_range() {
+            let text = &self.editor.buffer.as_str()[range.clone()];
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()));
+        }
+    }
+
+    /// Cut selected text to clipboard (copy + delete)
+    fn cut_selection(&mut self, cx: &mut Context<Self>) {
+        if let Some(range) = self.get_selection_range() {
+            // Copy to clipboard
+            let text = &self.editor.buffer.as_str()[range.clone()];
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()));
+
+            // Delete selection
+            self.delete_selection();
+        }
+    }
+
+    /// Paste clipboard content at cursor position
+    fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
+        if let Some(clipboard_item) = cx.read_from_clipboard() {
+            if let Some(text) = clipboard_item.text() {
+                // Delete selection if any
+                self.delete_selection();
+
+                // Insert clipboard text at cursor
+                let cursor_pos = self.editor.cursor.index;
+                self.editor.buffer.insert(cursor_pos, &text);
+
+                // Move cursor to end of pasted text
+                self.editor.cursor.index = cursor_pos + text.len();
+            }
+        }
+    }
+
     fn extend_selection_left(&mut self) {
         // Initialize anchor if no selection exists or selection is collapsed
         if self.get_selection_range().is_none() {
@@ -290,6 +327,28 @@ impl DiffEditorView {
         let shift_pressed = event.keystroke.modifiers.shift;
         let cmd_pressed = event.keystroke.modifiers.platform;
         let opt_pressed = event.keystroke.modifiers.alt;
+
+        // Handle clipboard operations first (Cmd without Shift/Option)
+        if cmd_pressed && !shift_pressed && !opt_pressed {
+            match event.keystroke.key.as_str() {
+                "c" => {
+                    self.copy_selection(cx);
+                    cx.notify();
+                    return;
+                }
+                "x" => {
+                    self.cut_selection(cx);
+                    cx.notify();
+                    return;
+                }
+                "v" => {
+                    self.paste_from_clipboard(cx);
+                    cx.notify();
+                    return;
+                }
+                _ => {}
+            }
+        }
 
         match event.keystroke.key.as_str() {
             "enter" => {
