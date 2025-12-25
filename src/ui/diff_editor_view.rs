@@ -161,12 +161,60 @@ impl DiffEditorView {
         index.min(text.len())
     }
 
+    fn clear_selection(&mut self) {
+        self.selection_start = None;
+        self.selection_end = None;
+        self.is_selecting = false;
+    }
+
+    fn extend_selection_left(&mut self) {
+        // Initialize anchor if no selection exists
+        if self.selection_start.is_none() {
+            self.selection_start = Some(self.editor.cursor.index);
+        }
+
+        // Move cursor left
+        self.editor.cursor.move_left();
+
+        // Update selection end to new cursor position
+        self.selection_end = Some(self.editor.cursor.index);
+    }
+
+    fn extend_selection_right(&mut self) {
+        if self.selection_start.is_none() {
+            self.selection_start = Some(self.editor.cursor.index);
+        }
+
+        self.editor.cursor.move_right(self.editor.buffer.len());
+        self.selection_end = Some(self.editor.cursor.index);
+    }
+
+    fn extend_selection_up(&mut self) {
+        if self.selection_start.is_none() {
+            self.selection_start = Some(self.editor.cursor.index);
+        }
+
+        self.editor.cursor.move_up(&self.editor.buffer);
+        self.selection_end = Some(self.editor.cursor.index);
+    }
+
+    fn extend_selection_down(&mut self) {
+        if self.selection_start.is_none() {
+            self.selection_start = Some(self.editor.cursor.index);
+        }
+
+        self.editor.cursor.move_down(&self.editor.buffer);
+        self.selection_end = Some(self.editor.cursor.index);
+    }
+
     fn on_key_down(
         self: &mut DiffEditorView,
         event: &KeyDownEvent,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let shift_pressed = event.keystroke.modifiers.shift;
+
         match event.keystroke.key.as_str() {
             "enter" => {
                 self.editor.insert_char('\n');
@@ -181,19 +229,39 @@ impl DiffEditorView {
                 cx.notify();
             }
             "up" => {
-                self.editor.cursor.move_up(&self.editor.buffer);
+                if shift_pressed {
+                    self.extend_selection_up();
+                } else {
+                    self.clear_selection();
+                    self.editor.cursor.move_up(&self.editor.buffer);
+                }
                 cx.notify();
             }
             "down" => {
-                self.editor.cursor.move_down(&self.editor.buffer);
+                if shift_pressed {
+                    self.extend_selection_down();
+                } else {
+                    self.clear_selection();
+                    self.editor.cursor.move_down(&self.editor.buffer);
+                }
                 cx.notify();
             }
             "left" => {
-                self.editor.cursor.move_left();
+                if shift_pressed {
+                    self.extend_selection_left();
+                } else {
+                    self.clear_selection();
+                    self.editor.cursor.move_left();
+                }
                 cx.notify();
             }
             "right" => {
-                self.editor.cursor.move_right(self.editor.buffer.len());
+                if shift_pressed {
+                    self.extend_selection_right();
+                } else {
+                    self.clear_selection();
+                    self.editor.cursor.move_right(self.editor.buffer.len());
+                }
                 cx.notify();
             }
             key => {
