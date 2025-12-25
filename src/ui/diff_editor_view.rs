@@ -211,6 +211,12 @@ impl DiffEditorView {
         }
     }
 
+    fn all_selection(&mut self) {
+        self.selection_start = Some(0);
+        self.selection_end = Some(self.editor.buffer.len());
+        self.editor.cursor.index = self.editor.buffer.len();
+    }
+
     fn extend_selection_left(&mut self) {
         if self.get_selection_range().is_none() {
             self.selection_start = Some(self.editor.cursor.index);
@@ -330,6 +336,11 @@ impl DiffEditorView {
                 }
                 "v" => {
                     self.paste_from_clipboard(cx);
+                    cx.notify();
+                    return;
+                }
+                "a" => {
+                    self.all_selection();
                     cx.notify();
                     return;
                 }
