@@ -210,6 +210,44 @@ impl DiffEditorView {
         self.selection_end = Some(self.editor.cursor.index);
     }
 
+    fn extend_selection_to_line_start(&mut self) {
+        if self.get_selection_range().is_none() {
+            self.selection_start = Some(self.editor.cursor.index);
+        }
+
+        self.editor.cursor.move_to_line_start(&self.editor.buffer);
+        self.selection_end = Some(self.editor.cursor.index);
+    }
+
+    fn extend_selection_to_line_end(&mut self) {
+        if self.get_selection_range().is_none() {
+            self.selection_start = Some(self.editor.cursor.index);
+        }
+
+        self.editor.cursor.move_to_line_end(&self.editor.buffer);
+        self.selection_end = Some(self.editor.cursor.index);
+    }
+
+    fn extend_selection_to_buffer_start(&mut self) {
+        if self.get_selection_range().is_none() {
+            self.selection_start = Some(self.editor.cursor.index);
+        }
+
+        self.editor.cursor.move_to_buffer_start();
+        self.selection_end = Some(self.editor.cursor.index);
+    }
+
+    fn extend_selection_to_buffer_end(&mut self) {
+        if self.get_selection_range().is_none() {
+            self.selection_start = Some(self.editor.cursor.index);
+        }
+
+        self.editor
+            .cursor
+            .move_to_buffer_end(self.editor.buffer.len());
+        self.selection_end = Some(self.editor.cursor.index);
+    }
+
     fn on_key_down(
         self: &mut DiffEditorView,
         event: &KeyDownEvent,
@@ -217,6 +255,7 @@ impl DiffEditorView {
         cx: &mut Context<Self>,
     ) {
         let shift_pressed = event.keystroke.modifiers.shift;
+        let cmd_pressed = event.keystroke.modifiers.platform;
 
         match event.keystroke.key.as_str() {
             "enter" => {
@@ -232,7 +271,12 @@ impl DiffEditorView {
                 cx.notify();
             }
             "up" => {
-                if shift_pressed {
+                if cmd_pressed && shift_pressed {
+                    self.extend_selection_to_buffer_start();
+                } else if cmd_pressed {
+                    self.clear_selection();
+                    self.editor.cursor.move_to_buffer_start();
+                } else if shift_pressed {
                     self.extend_selection_up();
                 } else {
                     self.clear_selection();
@@ -241,7 +285,14 @@ impl DiffEditorView {
                 cx.notify();
             }
             "down" => {
-                if shift_pressed {
+                if cmd_pressed && shift_pressed {
+                    self.extend_selection_to_buffer_end();
+                } else if cmd_pressed {
+                    self.clear_selection();
+                    self.editor
+                        .cursor
+                        .move_to_buffer_end(self.editor.buffer.len());
+                } else if shift_pressed {
                     self.extend_selection_down();
                 } else {
                     self.clear_selection();
@@ -250,7 +301,12 @@ impl DiffEditorView {
                 cx.notify();
             }
             "left" => {
-                if shift_pressed {
+                if cmd_pressed && shift_pressed {
+                    self.extend_selection_to_line_start();
+                } else if cmd_pressed {
+                    self.clear_selection();
+                    self.editor.cursor.move_to_line_start(&self.editor.buffer);
+                } else if shift_pressed {
                     self.extend_selection_left();
                 } else {
                     self.clear_selection();
@@ -259,7 +315,12 @@ impl DiffEditorView {
                 cx.notify();
             }
             "right" => {
-                if shift_pressed {
+                if cmd_pressed && shift_pressed {
+                    self.extend_selection_to_line_end();
+                } else if cmd_pressed {
+                    self.clear_selection();
+                    self.editor.cursor.move_to_line_end(&self.editor.buffer);
+                } else if shift_pressed {
                     self.extend_selection_right();
                 } else {
                     self.clear_selection();

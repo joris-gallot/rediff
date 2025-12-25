@@ -52,6 +52,28 @@ impl Cursor {
             self.index = buffer.len();
         }
     }
+
+    pub fn move_to_line_start(&mut self, buffer: &TextBuffer) {
+        let (line, _col) = buffer.char_to_line_col(self.index);
+        self.index = buffer.line_col_to_char(line, 0);
+    }
+
+    pub fn move_to_line_end(&mut self, buffer: &TextBuffer) {
+        let (line, _col) = buffer.char_to_line_col(self.index);
+        let line_len = buffer
+            .line(line)
+            .map(|l| l.trim_end_matches('\n').len())
+            .unwrap_or(0);
+        self.index = buffer.line_col_to_char(line, line_len);
+    }
+
+    pub fn move_to_buffer_start(&mut self) {
+        self.index = 0;
+    }
+
+    pub fn move_to_buffer_end(&mut self, buffer_len: usize) {
+        self.index = buffer_len;
+    }
 }
 
 #[cfg(test)]
@@ -196,5 +218,109 @@ mod tests {
 
         cursor.move_up(&buffer);
         assert_eq!(cursor.index, 2); // Back to column 2 in first line
+    }
+
+    #[test]
+    fn test_move_to_line_start() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "hello world");
+        let mut cursor = Cursor { index: 5 };
+
+        cursor.move_to_line_start(&buffer);
+        assert_eq!(cursor.index, 0);
+    }
+
+    #[test]
+    fn test_move_to_line_start_multiline() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "line1\nline2\nline3");
+        let mut cursor = Cursor { index: 14 }; // middle of line3
+
+        cursor.move_to_line_start(&buffer);
+        assert_eq!(cursor.index, 12); // start of line3
+    }
+
+    #[test]
+    fn test_move_to_line_end() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "hello world");
+        let mut cursor = Cursor { index: 5 };
+
+        cursor.move_to_line_end(&buffer);
+        assert_eq!(cursor.index, 11);
+    }
+
+    #[test]
+    fn test_move_to_line_end_multiline() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "line1\nline2\nline3");
+        let mut cursor = Cursor { index: 8 }; // middle of line2
+
+        cursor.move_to_line_end(&buffer);
+        assert_eq!(cursor.index, 11); // end of line2 (before \n)
+    }
+
+    #[test]
+    fn test_move_to_line_end_excludes_newline() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "hello\nworld");
+        let mut cursor = Cursor { index: 2 }; // in "hello"
+
+        cursor.move_to_line_end(&buffer);
+        assert_eq!(cursor.index, 5); // before \n, not at 6 (which is \n)
+    }
+
+    #[test]
+    fn test_move_to_buffer_start() {
+        let mut cursor = Cursor { index: 100 };
+        cursor.move_to_buffer_start();
+        assert_eq!(cursor.index, 0);
+    }
+
+    #[test]
+    fn test_move_to_buffer_end() {
+        let mut cursor = Cursor { index: 5 };
+        cursor.move_to_buffer_end(100);
+        assert_eq!(cursor.index, 100);
+    }
+
+    #[test]
+    fn test_move_to_line_start_already_at_start() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "hello world");
+        let mut cursor = Cursor { index: 0 };
+
+        cursor.move_to_line_start(&buffer);
+        assert_eq!(cursor.index, 0);
+    }
+
+    #[test]
+    fn test_move_to_line_end_already_at_end() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "hello world");
+        let mut cursor = Cursor { index: 11 };
+
+        cursor.move_to_line_end(&buffer);
+        assert_eq!(cursor.index, 11);
+    }
+
+    #[test]
+    fn test_move_to_line_start_empty_line() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "line1\n\nline3");
+        let mut cursor = Cursor { index: 6 }; // on empty line
+
+        cursor.move_to_line_start(&buffer);
+        assert_eq!(cursor.index, 6); // stays at start of empty line
+    }
+
+    #[test]
+    fn test_move_to_line_end_empty_line() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "line1\n\nline3");
+        let mut cursor = Cursor { index: 6 }; // on empty line
+
+        cursor.move_to_line_end(&buffer);
+        assert_eq!(cursor.index, 6); // stays at same position (line is empty)
     }
 }
