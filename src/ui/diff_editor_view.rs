@@ -57,12 +57,13 @@ impl DiffEditorView {
     }
 
     fn get_cursor_position(text: &str, cursor_index: usize) -> (usize, usize) {
-        let before_cursor = &text[..cursor_index.min(text.len())];
+        let clamped_index = cursor_index.min(text.len());
+        let before_cursor = &text[..clamped_index];
         let line = before_cursor.matches('\n').count();
         let col = before_cursor
             .rfind('\n')
-            .map(|pos| cursor_index - pos - 1)
-            .unwrap_or(cursor_index);
+            .map(|pos| clamped_index - pos - 1)
+            .unwrap_or(clamped_index);
         (line, col)
     }
 
@@ -450,5 +451,92 @@ impl Render for DiffEditorView {
                     )
                     .child(self.render_editor(text, cx)),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_cursor_position_start() {
+        let text = "hello world";
+        let (line, col) = DiffEditorView::get_cursor_position(text, 0);
+        assert_eq!(line, 0);
+        assert_eq!(col, 0);
+    }
+
+    #[test]
+    fn test_get_cursor_position_middle_of_line() {
+        let text = "hello world";
+        let (line, col) = DiffEditorView::get_cursor_position(text, 5);
+        assert_eq!(line, 0);
+        assert_eq!(col, 5);
+    }
+
+    #[test]
+    fn test_get_cursor_position_end_of_line() {
+        let text = "hello world";
+        let (line, col) = DiffEditorView::get_cursor_position(text, 11);
+        assert_eq!(line, 0);
+        assert_eq!(col, 11);
+    }
+
+    #[test]
+    fn test_get_cursor_position_second_line() {
+        let text = "hello\nworld";
+        let (line, col) = DiffEditorView::get_cursor_position(text, 6);
+        assert_eq!(line, 1);
+        assert_eq!(col, 0);
+    }
+
+    #[test]
+    fn test_get_cursor_position_second_line_middle() {
+        let text = "hello\nworld";
+        let (line, col) = DiffEditorView::get_cursor_position(text, 9);
+        assert_eq!(line, 1);
+        assert_eq!(col, 3);
+    }
+
+    #[test]
+    fn test_get_cursor_position_multiple_lines() {
+        let text = "line1\nline2\nline3";
+        let (line, col) = DiffEditorView::get_cursor_position(text, 12);
+        assert_eq!(line, 2);
+        assert_eq!(col, 0);
+    }
+
+    #[test]
+    fn test_get_cursor_position_empty_lines() {
+        let text = "hello\n\nworld";
+        let (line, col) = DiffEditorView::get_cursor_position(text, 7);
+        assert_eq!(line, 2);
+        assert_eq!(col, 0);
+    }
+
+    #[test]
+    fn test_get_cursor_position_beyond_text() {
+        let text = "hello";
+        let (line, col) = DiffEditorView::get_cursor_position(text, 100);
+        assert_eq!(line, 0);
+        assert_eq!(col, 5); // Clamped to text length
+    }
+
+    #[test]
+    fn test_editor_config_line_height() {
+        let config = EditorConfig { font_size: 16.0 };
+        assert_eq!(config.line_height(), 24.0);
+    }
+
+    #[test]
+    fn test_editor_config_cursor_height() {
+        let config = EditorConfig { font_size: 16.0 };
+        assert_eq!(config.cursor_height(), 22.0);
+    }
+
+    #[test]
+    fn test_editor_config_default() {
+        let config = EditorConfig::default();
+        assert_eq!(config.font_size, 16.0);
     }
 }
