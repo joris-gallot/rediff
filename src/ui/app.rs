@@ -1,9 +1,12 @@
 use crate::core::Editor;
 
 use gpui::{
-    App, Context, Div, FocusHandle, Focusable, KeyDownEvent, Render, Stateful, TextAlign, Window,
-    black, div, opaque_grey, prelude::*, px, white,
+    App, Context, Div, FocusHandle, Focusable, KeyDownEvent, MouseButton, MouseDownEvent, Render,
+    ScrollHandle, TextAlign, Window, black, div, opaque_grey, prelude::*, px, white,
 };
+
+const LINE_NUMBERS_WIDTH: f32 = 40.0;
+const EDITOR_PADDING: f32 = 8.0;
 
 #[derive(Clone, Debug)]
 pub struct EditorConfig {
@@ -30,6 +33,7 @@ pub struct EditorView {
     editor: Editor,
     focus_handle: FocusHandle,
     config: EditorConfig,
+    scroll_handle: ScrollHandle,
 }
 
 impl EditorView {
@@ -40,6 +44,7 @@ impl EditorView {
             editor: Editor::new(),
             focus_handle,
             config: config.unwrap_or_default(),
+            scroll_handle: ScrollHandle::new(),
         }
     }
 
@@ -99,7 +104,61 @@ impl EditorView {
         }
     }
 
-    fn render_editor(&mut self, text: String, cx: &mut Context<Self>) -> Div {
+    fn on_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mouse_pos = event.position;
+        let scroll_offset = self.scroll_handle.offset();
+
+        let config = &self.config;
+        let line_height_px = px(config.line_height());
+        let line_numbers_width_px = px(LINE_NUMBERS_WIDTH);
+        let padding_px = px(EDITOR_PADDING);
+
+        let adjusted_y = mouse_pos.y - scroll_offset.y;
+
+        let clicked_line = (adjusted_y / line_height_px) as usize;
+
+        let x_offset = mouse_pos.x - line_numbers_width_px - padding_px;
+        let char_width_px = px(config.font_size * 0.6);
+
+        let clicked_col_f32: f32 = x_offset / char_width_px;
+
+        // Implementing custom rounding: if the fractional part is >= 0.3, round up; else round down
+        let clicked_col = if clicked_col_f32.fract() >= 0.3 {
+            clicked_col_f32.ceil() as usize
+        } else {
+            clicked_col_f32.floor() as usize
+        };
+
+        let text = self.editor.buffer.as_str();
+        let lines: Vec<&str> = text.split('\n').collect();
+
+        if clicked_line >= lines.len() {
+            return;
+        }
+
+        let col = clicked_col.min(lines[clicked_line].len());
+
+        let mut index = 0;
+        for (i, line) in lines.iter().enumerate() {
+            if i < clicked_line {
+                index += line.len() + 1;
+            } else if i == clicked_line {
+                index += col;
+                break;
+            }
+        }
+
+        self.editor.cursor.index = index.min(text.len());
+
+        cx.notify();
+    }
+
+    fn render_editor(&mut self, text: String, _cx: &mut Context<Self>) -> Div {
         let cursor_index = self.editor.cursor.index;
         let (cursor_line, cursor_col) = Self::get_cursor_position(&text, cursor_index);
         let lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();
@@ -108,7 +167,7 @@ impl EditorView {
         div()
             .flex()
             .flex_col()
-            .px(px(8.0))
+            .px(px(EDITOR_PADDING))
             .w_full()
             .bg(white())
             .font_family("monospace")
@@ -149,11 +208,13 @@ impl Render for EditorView {
         div()
             .id("editor-view")
             .overflow_y_scroll()
+            .track_scroll(&self.scroll_handle)
             .track_focus(&self.focus_handle)
             .size_full()
             .bg(white())
             .text_size(px(config.font_size))
             .on_key_down(cx.listener(Self::on_key_down))
+            .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .child(
                 div()
                     .flex()
@@ -161,7 +222,7 @@ impl Render for EditorView {
                     .child(
                         div()
                             .px(px(4.0))
-                            .w(px(40.0))
+                            .w(px(LINE_NUMBERS_WIDTH))
                             .bg(opaque_grey(0.9, 1.0))
                             .flex_col()
                             .items_center()
