@@ -1,3 +1,5 @@
+use super::buffer::TextBuffer;
+
 pub struct Cursor {
     pub index: usize,
 }
@@ -19,55 +21,180 @@ impl Cursor {
         }
     }
 
-    pub fn move_up(&mut self, text: &str) {
-        if self.index == 0 {
-            return;
+    pub fn move_up(&mut self, buffer: &TextBuffer) {
+        let (line, col) = buffer.char_to_line_col(self.index);
+
+        if line > 0 {
+            let new_line = line - 1;
+            let line_len = buffer
+                .line(new_line)
+                .map(|l| l.trim_end_matches('\n').len())
+                .unwrap_or(0);
+            let new_col = col.min(line_len);
+            self.index = buffer.line_col_to_char(new_line, new_col);
+        } else {
+            self.index = 0;
         }
-
-        let before = &text[..self.index];
-        let current_line_start = before.rfind('\n').map_or(0, |pos| pos + 1);
-        let col = self.index - current_line_start;
-
-        if current_line_start == 0 {
-            return;
-        }
-
-        let prev_line_start = before[..current_line_start - 1]
-            .rfind('\n')
-            .map_or(0, |pos| pos + 1);
-
-        let prev_line_len = current_line_start - 1 - prev_line_start;
-        self.index = prev_line_start + col.min(prev_line_len);
     }
 
-    pub fn move_down(&mut self, text: &str) {
-        if self.index >= text.len() {
-            return;
+    pub fn move_down(&mut self, buffer: &TextBuffer) {
+        let (line, col) = buffer.char_to_line_col(self.index);
+
+        if line < buffer.line_count() - 1 {
+            let new_line = line + 1;
+            let line_len = buffer
+                .line(new_line)
+                .map(|l| l.trim_end_matches('\n').len())
+                .unwrap_or(0);
+            let new_col = col.min(line_len);
+            self.index = buffer.line_col_to_char(new_line, new_col);
+        } else {
+            self.index = buffer.len();
         }
+    }
+}
 
-        let before = &text[..self.index];
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        let current_line_start = before.rfind('\n').map(|pos| pos + 1).unwrap_or(0);
+    #[test]
+    fn test_new_cursor() {
+        let cursor = Cursor::new();
+        assert_eq!(cursor.index, 0);
+    }
 
-        let col = self.index - current_line_start;
+    #[test]
+    fn test_move_left() {
+        let mut cursor = Cursor::new();
+        cursor.index = 5;
 
-        let current_line_end = text[self.index..]
-            .find('\n')
-            .map(|pos| self.index + pos)
-            .unwrap_or(text.len());
+        cursor.move_left();
+        assert_eq!(cursor.index, 4);
 
-        if current_line_end >= text.len() {
-            return;
-        }
+        cursor.move_left();
+        assert_eq!(cursor.index, 3);
+    }
 
-        let next_line_start = current_line_end + 1;
+    #[test]
+    fn test_move_left_at_start() {
+        let mut cursor = Cursor::new();
+        cursor.index = 0;
 
-        let next_line_end = text[next_line_start..]
-            .find('\n')
-            .map(|pos| next_line_start + pos)
-            .unwrap_or(text.len());
+        cursor.move_left();
+        assert_eq!(cursor.index, 0); // Should stay at 0
+    }
 
-        let next_line_len = next_line_end - next_line_start;
-        self.index = next_line_start + col.min(next_line_len);
+    #[test]
+    fn test_move_right() {
+        let mut cursor = Cursor::new();
+
+        cursor.move_right(10);
+        assert_eq!(cursor.index, 1);
+
+        cursor.move_right(10);
+        assert_eq!(cursor.index, 2);
+    }
+
+    #[test]
+    fn test_move_right_at_end() {
+        let mut cursor = Cursor::new();
+        cursor.index = 5;
+
+        cursor.move_right(5);
+        assert_eq!(cursor.index, 5); // Should not go beyond max
+    }
+
+    #[test]
+    fn test_move_up() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "Line 1\nLine 2\nLine 3");
+
+        let mut cursor = Cursor::new();
+        cursor.index = 10; // Middle of "Line 2"
+
+        cursor.move_up(&buffer);
+        assert_eq!(cursor.index, 3); // Same column in "Line 1"
+    }
+
+    #[test]
+    fn test_move_up_at_first_line() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "Line 1\nLine 2");
+
+        let mut cursor = Cursor::new();
+        cursor.index = 3; // In first line
+
+        cursor.move_up(&buffer);
+        assert_eq!(cursor.index, 0); // Should go to start
+    }
+
+    #[test]
+    fn test_move_up_shorter_line() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "Hi\nLonger line");
+
+        let mut cursor = Cursor::new();
+        cursor.index = 10; // Near end of "Longer line"
+
+        cursor.move_up(&buffer);
+        assert_eq!(cursor.index, 2); // Should clamp to end of "Hi" (before \n)
+    }
+
+    #[test]
+    fn test_move_down() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "Line 1\nLine 2\nLine 3");
+
+        let mut cursor = Cursor::new();
+        cursor.index = 3; // Middle of "Line 1"
+
+        cursor.move_down(&buffer);
+        assert_eq!(cursor.index, 10); // Same column in "Line 2"
+    }
+
+    #[test]
+    fn test_move_down_at_last_line() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "Line 1\nLine 2");
+
+        let mut cursor = Cursor::new();
+        cursor.index = 10; // In last line
+
+        cursor.move_down(&buffer);
+        assert_eq!(cursor.index, buffer.len()); // Should go to end
+    }
+
+    #[test]
+    fn test_move_down_shorter_line() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "Longer line\nHi");
+
+        let mut cursor = Cursor::new();
+        cursor.index = 8; // Near end of "Longer line"
+
+        cursor.move_down(&buffer);
+        assert_eq!(cursor.index, 14); // Should clamp to end of "Hi"
+    }
+
+    #[test]
+    fn test_vertical_movement_preserves_column() {
+        let mut buffer = TextBuffer::new();
+        buffer.insert(0, "AAAA\nBBBB\nCCCC");
+
+        let mut cursor = Cursor::new();
+        cursor.index = 2; // Column 2 in first line
+
+        cursor.move_down(&buffer);
+        assert_eq!(cursor.index, 7); // Column 2 in second line
+
+        cursor.move_down(&buffer);
+        assert_eq!(cursor.index, 12); // Column 2 in third line
+
+        cursor.move_up(&buffer);
+        assert_eq!(cursor.index, 7); // Back to column 2 in second line
+
+        cursor.move_up(&buffer);
+        assert_eq!(cursor.index, 2); // Back to column 2 in first line
     }
 }

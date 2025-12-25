@@ -78,11 +78,11 @@ impl EditorView {
                 cx.notify();
             }
             "up" => {
-                self.editor.cursor.move_up(self.editor.buffer.as_str());
+                self.editor.cursor.move_up(&self.editor.buffer);
                 cx.notify();
             }
             "down" => {
-                self.editor.cursor.move_down(self.editor.buffer.as_str());
+                self.editor.cursor.move_down(&self.editor.buffer);
                 cx.notify();
             }
             "left" => {
@@ -90,9 +90,7 @@ impl EditorView {
                 cx.notify();
             }
             "right" => {
-                self.editor
-                    .cursor
-                    .move_right(self.editor.buffer.as_str().len());
+                self.editor.cursor.move_right(self.editor.buffer.len());
                 cx.notify();
             }
             key => {
