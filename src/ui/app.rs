@@ -2,21 +2,44 @@ use crate::core::Editor;
 
 use gpui::{
     App, Context, Div, FocusHandle, Focusable, KeyDownEvent, Render, TextAlign, Window, black, div,
-    opaque_grey, prelude::*, px, red, white,
+    opaque_grey, prelude::*, px, white,
 };
+
+#[derive(Clone, Debug)]
+pub struct EditorConfig {
+    pub font_size: f32,
+}
+
+impl Default for EditorConfig {
+    fn default() -> Self {
+        Self { font_size: 16.0 }
+    }
+}
+
+impl EditorConfig {
+    pub fn line_height(&self) -> f32 {
+        self.font_size * 1.5
+    }
+
+    pub fn cursor_height(&self) -> f32 {
+        self.line_height() - 2.0
+    }
+}
 
 pub struct EditorView {
     editor: Editor,
     focus_handle: FocusHandle,
+    config: EditorConfig,
 }
 
 impl EditorView {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(config: Option<EditorConfig>, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
 
         Self {
             editor: Editor::new(),
             focus_handle,
+            config: config.unwrap_or_default(),
         }
     }
 
@@ -34,6 +57,7 @@ impl EditorView {
         let cursor_index = self.editor.cursor.index;
         let (cursor_line, cursor_col) = Self::get_cursor_position(&text, cursor_index);
         let lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();
+        let config = &self.config;
 
         div()
             .flex()
@@ -51,12 +75,14 @@ impl EditorView {
                     div()
                         .flex()
                         .flex_row()
-                        .line_height(px(20.0))
+                        .line_height(px(config.line_height()))
                         .child(before)
-                        .child(div().w(px(2.0)).h(px(18.0)).bg(black()))
+                        .child(div().w(px(2.0)).h(px(config.cursor_height())).bg(black()))
                         .child(after)
                 } else {
-                    div().line_height(px(20.0)).child(line.to_string())
+                    div()
+                        .line_height(px(config.line_height()))
+                        .child(line.to_string())
                 }
             }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
@@ -113,11 +139,13 @@ impl Render for EditorView {
         let text = self.editor.buffer.as_str().to_string();
 
         let lines: Vec<&str> = text.split('\n').collect();
+        let config = &self.config;
 
         div()
             .flex()
             .size_full()
             .bg(white())
+            .text_size(px(config.font_size))
             .child(
                 div()
                     .px(px(4.0))
@@ -128,7 +156,7 @@ impl Render for EditorView {
                     .children(lines.iter().enumerate().map(|(i, _)| {
                         div()
                             .text_align(TextAlign::Right)
-                            .line_height(px(20.0))
+                            .line_height(px(config.line_height()))
                             .child((i + 1).to_string())
                     })),
             )

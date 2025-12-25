@@ -2,10 +2,7 @@ mod core;
 mod ui;
 use crate::ui::EditorView;
 
-use gpui::{
-    App, Application, Bounds, Context, SharedString, Window, WindowBounds, WindowOptions, div,
-    prelude::*, px, rgb, size,
-};
+use gpui::{App, Application, Bounds, WindowBounds, WindowOptions, prelude::*, px, size};
 
 fn main() {
     Application::new().run(|cx: &mut App| {
@@ -15,7 +12,7 @@ fn main() {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
-            |_, cx| cx.new(EditorView::new),
+            |_, cx| cx.new(|cx| EditorView::new(None, cx)),
         )
         .unwrap();
 
