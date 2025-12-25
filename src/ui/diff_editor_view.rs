@@ -6,7 +6,7 @@ use gpui::{
     div, opaque_grey, prelude::*, px, rgb, white,
 };
 
-const LINE_NUMBERS_WIDTH: f32 = 40.0;
+const LINE_NUMBERS_WIDTH: f32 = 50.0;
 const EDITOR_PADDING: f32 = 8.0;
 
 #[derive(Clone, Debug)]
