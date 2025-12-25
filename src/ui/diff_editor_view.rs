@@ -113,16 +113,6 @@ impl DiffEditorView {
         let adjusted_y = mouse_pos.y - scroll_offset.y;
         let clicked_line = (adjusted_y / line_height_px).max(0.0) as usize;
 
-        let x_offset = mouse_pos.x - line_numbers_width_px - padding_px;
-        let char_width_px = px(config.font_size * 0.6);
-        let clicked_col_f32: f32 = x_offset / char_width_px;
-
-        let clicked_col = if clicked_col_f32.fract() >= 0.3 {
-            clicked_col_f32.ceil() as usize
-        } else {
-            clicked_col_f32.floor() as usize
-        };
-
         let text = self.editor.buffer.as_str();
         let lines: Vec<&str> = text.split('\n').collect();
 
@@ -130,7 +120,32 @@ impl DiffEditorView {
             return text.len();
         }
 
-        let col = clicked_col.min(lines[clicked_line].len());
+        let line = lines[clicked_line];
+        let x_offset = mouse_pos.x - line_numbers_width_px - padding_px;
+
+        // Calculate character widths dynamically
+        // Spaces are rendered narrower, alphanumeric chars are wider
+        let space_width = config.font_size * 0.27; // Approximate space width
+        let char_width = config.font_size * 0.57; // Approximate letter width
+
+        // Find the column by accumulating widths
+        let mut accumulated_width = 0.0;
+        let mut col = 0;
+
+        for (i, ch) in line.chars().enumerate() {
+            let ch_width = if ch == ' ' { space_width } else { char_width };
+
+            // Check if we've passed the click position
+            if accumulated_width + ch_width / 2.0 > x_offset.into() {
+                col = i;
+                break;
+            }
+
+            accumulated_width += ch_width;
+            col = i + 1;
+        }
+
+        let col = col.min(line.len());
 
         let mut index = 0;
         for (i, line) in lines.iter().enumerate() {
