@@ -53,6 +53,52 @@ impl EditorView {
         (line, col)
     }
 
+    fn on_key_down(
+        self: &mut EditorView,
+        event: &KeyDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event.keystroke.key.as_str() {
+            "enter" => {
+                self.editor.insert_char('\n');
+                cx.notify();
+            }
+            "backspace" => {
+                self.editor.backspace();
+                cx.notify();
+            }
+            "space" => {
+                self.editor.insert_char(' ');
+                cx.notify();
+            }
+            "up" => {
+                self.editor.cursor.move_up(self.editor.buffer.as_str());
+                cx.notify();
+            }
+            "down" => {
+                self.editor.cursor.move_down(self.editor.buffer.as_str());
+                cx.notify();
+            }
+            "left" => {
+                self.editor.cursor.move_left();
+                cx.notify();
+            }
+            "right" => {
+                self.editor
+                    .cursor
+                    .move_right(self.editor.buffer.as_str().len());
+                cx.notify();
+            }
+            key => {
+                if let Some(ch) = key.chars().next() {
+                    self.editor.insert_char(ch);
+                    cx.notify();
+                }
+            }
+        }
+    }
+
     fn render_editor(&mut self, text: String, cx: &mut Context<Self>) -> Div {
         let cursor_index = self.editor.cursor.index;
         let (cursor_line, cursor_col) = Self::get_cursor_position(&text, cursor_index);
@@ -66,7 +112,6 @@ impl EditorView {
             .w_full()
             .bg(white())
             .font_family("monospace")
-            .track_focus(&self.focus_handle)
             .children(lines.into_iter().enumerate().map(|(i, line)| {
                 if i == cursor_line {
                     let before = line[..cursor_col.min(line.len())].to_string();
@@ -83,46 +128,6 @@ impl EditorView {
                     div()
                         .line_height(px(config.line_height()))
                         .child(line.to_string())
-                }
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                match event.keystroke.key.as_str() {
-                    "enter" => {
-                        this.editor.insert_char('\n');
-                        cx.notify();
-                    }
-                    "backspace" => {
-                        this.editor.backspace();
-                        cx.notify();
-                    }
-                    "space" => {
-                        this.editor.insert_char(' ');
-                        cx.notify();
-                    }
-                    "up" => {
-                        this.editor.cursor.move_up(this.editor.buffer.as_str());
-                        cx.notify();
-                    }
-                    "down" => {
-                        this.editor.cursor.move_down(this.editor.buffer.as_str());
-                        cx.notify();
-                    }
-                    "left" => {
-                        this.editor.cursor.move_left();
-                        cx.notify();
-                    }
-                    "right" => {
-                        this.editor
-                            .cursor
-                            .move_right(this.editor.buffer.as_str().len());
-                        cx.notify();
-                    }
-                    key => {
-                        if let Some(ch) = key.chars().next() {
-                            this.editor.insert_char(ch);
-                            cx.notify();
-                        }
-                    }
                 }
             }))
     }
@@ -144,9 +149,11 @@ impl Render for EditorView {
         div()
             .id("editor-view")
             .overflow_y_scroll()
+            .track_focus(&self.focus_handle)
             .size_full()
             .bg(white())
             .text_size(px(config.font_size))
+            .on_key_down(cx.listener(Self::on_key_down))
             .child(
                 div()
                     .flex()
