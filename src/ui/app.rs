@@ -1,8 +1,8 @@
 use crate::core::Editor;
 
 use gpui::{
-    App, Context, Div, FocusHandle, Focusable, KeyDownEvent, Render, TextAlign, Window, black, div,
-    opaque_grey, prelude::*, px, white,
+    App, Context, Div, FocusHandle, Focusable, KeyDownEvent, Render, Stateful, TextAlign, Window,
+    black, div, opaque_grey, prelude::*, px, white,
 };
 
 #[derive(Clone, Debug)]
@@ -63,7 +63,7 @@ impl EditorView {
             .flex()
             .flex_col()
             .px(px(8.0))
-            .size_full()
+            .w_full()
             .bg(white())
             .font_family("monospace")
             .track_focus(&self.focus_handle)
@@ -142,24 +142,30 @@ impl Render for EditorView {
         let config = &self.config;
 
         div()
-            .flex()
+            .id("editor-view")
+            .overflow_y_scroll()
             .size_full()
             .bg(white())
             .text_size(px(config.font_size))
             .child(
                 div()
-                    .px(px(4.0))
-                    .w(px(40.0))
-                    .bg(opaque_grey(0.9, 1.0))
-                    .flex_col()
-                    .items_center()
-                    .children(lines.iter().enumerate().map(|(i, _)| {
+                    .flex()
+                    .w_full()
+                    .child(
                         div()
-                            .text_align(TextAlign::Right)
-                            .line_height(px(config.line_height()))
-                            .child((i + 1).to_string())
-                    })),
+                            .px(px(4.0))
+                            .w(px(40.0))
+                            .bg(opaque_grey(0.9, 1.0))
+                            .flex_col()
+                            .items_center()
+                            .children(lines.iter().enumerate().map(|(i, _)| {
+                                div()
+                                    .text_align(TextAlign::Right)
+                                    .line_height(px(config.line_height()))
+                                    .child((i + 1).to_string())
+                            })),
+                    )
+                    .child(self.render_editor(text, cx)),
             )
-            .child(self.render_editor(text, cx))
     }
 }
