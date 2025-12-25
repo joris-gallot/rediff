@@ -168,8 +168,8 @@ impl DiffEditorView {
     }
 
     fn extend_selection_left(&mut self) {
-        // Initialize anchor if no selection exists
-        if self.selection_start.is_none() {
+        // Initialize anchor if no selection exists or selection is collapsed
+        if self.get_selection_range().is_none() {
             self.selection_start = Some(self.editor.cursor.index);
         }
 
@@ -181,7 +181,8 @@ impl DiffEditorView {
     }
 
     fn extend_selection_right(&mut self) {
-        if self.selection_start.is_none() {
+        // Initialize anchor if no selection exists or selection is collapsed
+        if self.get_selection_range().is_none() {
             self.selection_start = Some(self.editor.cursor.index);
         }
 
@@ -190,7 +191,8 @@ impl DiffEditorView {
     }
 
     fn extend_selection_up(&mut self) {
-        if self.selection_start.is_none() {
+        // Initialize anchor if no selection exists or selection is collapsed
+        if self.get_selection_range().is_none() {
             self.selection_start = Some(self.editor.cursor.index);
         }
 
@@ -199,7 +201,8 @@ impl DiffEditorView {
     }
 
     fn extend_selection_down(&mut self) {
-        if self.selection_start.is_none() {
+        // Initialize anchor if no selection exists or selection is collapsed
+        if self.get_selection_range().is_none() {
             self.selection_start = Some(self.editor.cursor.index);
         }
 
