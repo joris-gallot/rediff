@@ -167,6 +167,7 @@ impl EditorView {
             .flex_col()
             .px(px(EDITOR_PADDING))
             .w_full()
+            .cursor_text()
             .bg(white())
             .font_family("monospace")
             .children(lines.into_iter().enumerate().map(|(i, line)| {
