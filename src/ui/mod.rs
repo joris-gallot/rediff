@@ -1,3 +1,3 @@
-mod app;
+mod diff_editor_view;
 
-pub use app::EditorView;
+pub use diff_editor_view::DiffEditorView;

@@ -30,7 +30,7 @@ impl EditorConfig {
     }
 }
 
-pub struct EditorView {
+pub struct DiffEditorView {
     editor: Editor,
     focus_handle: FocusHandle,
     config: EditorConfig,
@@ -41,7 +41,7 @@ pub struct EditorView {
     selection_end: Option<usize>,
 }
 
-impl EditorView {
+impl DiffEditorView {
     pub fn new(config: Option<EditorConfig>, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
 
@@ -146,7 +146,7 @@ impl EditorView {
     }
 
     fn on_key_down(
-        self: &mut EditorView,
+        self: &mut DiffEditorView,
         event: &KeyDownEvent,
         _window: &mut Window,
         cx: &mut Context<Self>,
@@ -389,13 +389,13 @@ impl EditorView {
     }
 }
 
-impl Focusable for EditorView {
+impl Focusable for DiffEditorView {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl Render for EditorView {
+impl Render for DiffEditorView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let text = self.editor.buffer.as_str().to_string();
 
