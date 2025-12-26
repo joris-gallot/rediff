@@ -1,4 +1,4 @@
-use crate::core::Editor;
+use crate::core::{Cursor, Editor};
 
 use gpui::{
   App, Context, Div, FocusHandle, Focusable, KeyDownEvent, MouseButton, MouseDownEvent,
@@ -56,14 +56,47 @@ impl DiffEditorView {
     }
   }
 
+  /// Helper function to split a string at a character index (not byte index)
+  fn split_at_char(s: &str, char_idx: usize) -> (String, String) {
+    // Find the byte index corresponding to the character index
+    let byte_idx = s
+      .char_indices()
+      .nth(char_idx)
+      .map(|(idx, _)| idx)
+      .unwrap_or(s.len());
+
+    let (before, after) = s.split_at(byte_idx);
+    (before.to_string(), after.to_string())
+  }
+
+  /// Helper function to get substring from char_start to char_end (character indices)
+  fn substring_chars(s: &str, char_start: usize, char_end: usize) -> String {
+    s.chars()
+      .skip(char_start)
+      .take(char_end - char_start)
+      .collect()
+  }
+
   fn get_cursor_position(text: &str, cursor_index: usize) -> (usize, usize) {
-    let clamped_index = cursor_index.min(text.len());
-    let before_cursor = &text[..clamped_index];
-    let line = before_cursor.matches('\n').count();
-    let col = before_cursor
-      .rfind('\n')
-      .map(|pos| clamped_index - pos - 1)
-      .unwrap_or(clamped_index);
+    let chars: Vec<char> = text.chars().collect();
+    let clamped_index = cursor_index.min(chars.len());
+
+    // Count lines and columns based on character indices
+    let mut line = 0;
+    let mut col = 0;
+
+    for (i, &ch) in chars.iter().enumerate() {
+      if i >= clamped_index {
+        break;
+      }
+      if ch == '\n' {
+        line += 1;
+        col = 0;
+      } else {
+        col += 1;
+      }
+    }
+
     (line, col)
   }
 
@@ -75,19 +108,7 @@ impl DiffEditorView {
   }
 
   fn select_word_at(&self, index: usize) -> (usize, usize) {
-    let text = self.editor.buffer.as_str();
-
-    let start = text[..index]
-      .rfind(|c: char| !c.is_alphanumeric() && c != '_')
-      .map(|i| i + 1)
-      .unwrap_or(0);
-
-    let end = text[index..]
-      .find(|c: char| !c.is_alphanumeric() && c != '_')
-      .map(|i| index + i)
-      .unwrap_or(text.len());
-
-    (start, end)
+    Cursor::find_word_boundaries(&self.editor.buffer, index)
   }
 
   fn select_line_at(&self, index: usize) -> (usize, usize) {
@@ -118,7 +139,7 @@ impl DiffEditorView {
     let lines: Vec<&str> = text.split('\n').collect();
 
     if clicked_line >= lines.len() {
-      return text.len();
+      return self.editor.buffer.len(); // Use buffer.len() which returns char count
     }
 
     let line = lines[clicked_line];
@@ -146,19 +167,21 @@ impl DiffEditorView {
       col = i + 1;
     }
 
-    let col = col.min(line.len());
+    let line_char_count = line.chars().count();
+    let col = col.min(line_char_count);
 
+    // Calculate character index (not byte index)
     let mut index = 0;
     for (i, line) in lines.iter().enumerate() {
       if i < clicked_line {
-        index += line.len() + 1;
+        index += line.chars().count() + 1; // +1 for newline character
       } else if i == clicked_line {
         index += col;
         break;
       }
     }
 
-    index.min(text.len())
+    index.min(self.editor.buffer.len())
   }
 
   fn clear_selection(&mut self) {
@@ -182,16 +205,16 @@ impl DiffEditorView {
   /// Copy selected text to clipboard
   fn copy_selection(&mut self, cx: &mut Context<Self>) {
     if let Some(range) = self.get_selection_range() {
-      let text = &self.editor.buffer.as_str()[range.clone()];
-      cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()));
+      let text = Self::substring_chars(&self.editor.buffer.as_str(), range.start, range.end);
+      cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
     }
   }
 
   /// Cut selected text to clipboard (copy + delete)
   fn cut_selection(&mut self, cx: &mut Context<Self>) {
     if let Some(range) = self.get_selection_range() {
-      let text = &self.editor.buffer.as_str()[range.clone()];
-      cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()));
+      let text = Self::substring_chars(&self.editor.buffer.as_str(), range.start, range.end);
+      cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
 
       self.delete_selection();
     }
@@ -207,7 +230,8 @@ impl DiffEditorView {
       let cursor_pos = self.editor.cursor.index;
       self.editor.buffer.insert(cursor_pos, &text);
 
-      self.editor.cursor.index = cursor_pos + text.len();
+      // Count characters, not bytes
+      self.editor.cursor.index = cursor_pos + text.chars().count();
     }
   }
 
@@ -358,6 +382,12 @@ impl DiffEditorView {
       "backspace" => {
         if self.get_selection_range().is_some() {
           self.delete_selection();
+        } else if cmd_pressed {
+          // Cmd+Backspace: delete entire line
+          self.editor.delete_line();
+        } else if opt_pressed {
+          // Option+Backspace: delete word
+          self.editor.delete_word();
         } else {
           self.editor.backspace();
         }
@@ -535,7 +565,7 @@ impl DiffEditorView {
     let mut line_starts = vec![0];
     let mut pos = 0;
     for line in &lines {
-      pos += line.len() + 1; // +1 for \n
+      pos += line.chars().count() + 1; // +1 for \n, count characters not bytes
       line_starts.push(pos);
     }
 
@@ -549,14 +579,15 @@ impl DiffEditorView {
       .font_family("monospace")
       .children(lines.into_iter().enumerate().map(|(i, line)| {
         let line_start = line_starts[i];
-        let line_end = line_start + line.len();
+        let line_end = line_start + line.chars().count();
 
         if let Some(ref sel) = selection {
           if sel.start >= line_end || sel.end <= line_start {
             // No selection on this line - render normally
             if i == cursor_line {
-              let before = line[..cursor_col.min(line.len())].to_string();
-              let after = line[cursor_col.min(line.len())..].to_string();
+              let line_char_count = line.chars().count();
+              let cursor_col_clamped = cursor_col.min(line_char_count);
+              let (before, after) = Self::split_at_char(&line, cursor_col_clamped);
 
               div()
                 .flex()
@@ -572,12 +603,13 @@ impl DiffEditorView {
             }
           } else {
             // Line has selection
-            let sel_start_in_line = sel.start.saturating_sub(line_start).min(line.len());
-            let sel_end_in_line = sel.end.saturating_sub(line_start).min(line.len());
+            let line_char_count = line.chars().count();
+            let sel_start_in_line = sel.start.saturating_sub(line_start).min(line_char_count);
+            let sel_end_in_line = sel.end.saturating_sub(line_start).min(line_char_count);
 
-            let before_sel = line[..sel_start_in_line].to_string();
-            let selected = line[sel_start_in_line..sel_end_in_line].to_string();
-            let after_sel = line[sel_end_in_line..].to_string();
+            let before_sel = Self::substring_chars(&line, 0, sel_start_in_line);
+            let selected = Self::substring_chars(&line, sel_start_in_line, sel_end_in_line);
+            let after_sel = Self::substring_chars(&line, sel_end_in_line, line_char_count);
 
             let mut row = div()
               .flex()
@@ -605,11 +637,11 @@ impl DiffEditorView {
                 row = row.child(div().w(px(2.0)).h(px(config.cursor_height())).bg(white()));
               } else if cursor_pos_in_line > sel_end_in_line {
                 // Cursor is after selection
+                let after_sel_char_count = after_sel.chars().count();
                 let cursor_offset = cursor_pos_in_line
                   .saturating_sub(sel_end_in_line)
-                  .min(after_sel.len());
-                let before_cursor = after_sel[..cursor_offset].to_string();
-                let after_cursor = after_sel[cursor_offset..].to_string();
+                  .min(after_sel_char_count);
+                let (before_cursor, after_cursor) = Self::split_at_char(&after_sel, cursor_offset);
 
                 if !before_cursor.is_empty() {
                   row = row.child(before_cursor);
@@ -631,8 +663,9 @@ impl DiffEditorView {
         } else {
           // No selection at all
           if i == cursor_line {
-            let before = line[..cursor_col.min(line.len())].to_string();
-            let after = line[cursor_col.min(line.len())..].to_string();
+            let line_char_count = line.chars().count();
+            let cursor_col_clamped = cursor_col.min(line_char_count);
+            let (before, after) = Self::split_at_char(&line, cursor_col_clamped);
 
             div()
               .flex()
@@ -785,5 +818,74 @@ mod tests {
   fn test_editor_config_default() {
     let config = EditorConfig::default();
     assert_eq!(config.font_size, 16.0);
+  }
+
+  #[test]
+  fn test_get_cursor_position_with_emoji() {
+    let text = "hello 🌍 world";
+    // "hello " = 6 chars, "🌍" = 1 char, " world" = 6 chars
+    // Total = 13 characters
+
+    // At start
+    let (line, col) = DiffEditorView::get_cursor_position(text, 0);
+    assert_eq!(line, 0);
+    assert_eq!(col, 0);
+
+    // Before emoji (character index 6)
+    let (line, col) = DiffEditorView::get_cursor_position(text, 6);
+    assert_eq!(line, 0);
+    assert_eq!(col, 6);
+
+    // After emoji (character index 7)
+    let (line, col) = DiffEditorView::get_cursor_position(text, 7);
+    assert_eq!(line, 0);
+    assert_eq!(col, 7);
+
+    // At end (character index 13)
+    let (line, col) = DiffEditorView::get_cursor_position(text, 13);
+    assert_eq!(line, 0);
+    assert_eq!(col, 13);
+  }
+
+  #[test]
+  fn test_split_at_char_with_emoji() {
+    let text = "hello 🌍 world";
+
+    // Split before emoji (char index 6)
+    let (before, after) = DiffEditorView::split_at_char(text, 6);
+    assert_eq!(before, "hello ");
+    assert_eq!(after, "🌍 world");
+
+    // Split after emoji (char index 7)
+    let (before, after) = DiffEditorView::split_at_char(text, 7);
+    assert_eq!(before, "hello 🌍");
+    assert_eq!(after, " world");
+
+    // Split at start
+    let (before, after) = DiffEditorView::split_at_char(text, 0);
+    assert_eq!(before, "");
+    assert_eq!(after, "hello 🌍 world");
+
+    // Split at end
+    let (before, after) = DiffEditorView::split_at_char(text, 13);
+    assert_eq!(before, "hello 🌍 world");
+    assert_eq!(after, "");
+  }
+
+  #[test]
+  fn test_substring_chars_with_emoji() {
+    let text = "hello 🌍 world";
+
+    // Extract emoji
+    let result = DiffEditorView::substring_chars(text, 6, 7);
+    assert_eq!(result, "🌍");
+
+    // Extract around emoji
+    let result = DiffEditorView::substring_chars(text, 5, 8);
+    assert_eq!(result, " 🌍 ");
+
+    // Extract full string
+    let result = DiffEditorView::substring_chars(text, 0, 13);
+    assert_eq!(result, "hello 🌍 world");
   }
 }
