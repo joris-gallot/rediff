@@ -1,4 +1,3 @@
-use cursor::Cursor;
 use editor::Editor;
 
 use gpui::{
@@ -50,8 +49,6 @@ pub struct DiffEditorView {
   scroll_handle: ScrollHandle,
 
   is_selecting: bool,
-  selection_start: Option<usize>,
-  selection_end: Option<usize>,
 
   // Cache shaped lines for accurate position calculations
   line_layouts: Vec<ShapedLine>,
@@ -67,8 +64,6 @@ impl DiffEditorView {
       config: config.unwrap_or_default(),
       scroll_handle: ScrollHandle::new(),
       is_selecting: false,
-      selection_start: None,
-      selection_end: None,
       line_layouts: Vec::new(),
     }
   }
@@ -186,7 +181,7 @@ impl DiffEditorView {
 
     let line_layouts = Self::shape_lines(&self.editor.buffer, config, window);
 
-    let cursor_bounds = if self.get_selection_range().is_none() {
+    let cursor_bounds = if self.editor.selection_range().is_none() {
       Self::layout_cursor(
         self.editor.cursor.index,
         &self.editor.buffer,
@@ -198,7 +193,7 @@ impl DiffEditorView {
       None
     };
 
-    let selection_bounds = if let Some(range) = self.get_selection_range() {
+    let selection_bounds = if let Some(range) = self.editor.selection_range() {
       Self::layout_selection(
         range.start,
         range.end,
@@ -216,39 +211,6 @@ impl DiffEditorView {
       cursor_bounds,
       selection_bounds,
     }
-  }
-
-  /// Helper function to get substring from char_start to char_end (character indices)
-  fn substring_chars(s: &str, char_start: usize, char_end: usize) -> String {
-    s.chars()
-      .skip(char_start)
-      .take(char_end - char_start)
-      .collect()
-  }
-
-  fn get_selection_range(&self) -> Option<std::ops::Range<usize>> {
-    match (self.selection_start, self.selection_end) {
-      (Some(start), Some(end)) if start != end => Some(start.min(end)..start.max(end)),
-      _ => None,
-    }
-  }
-
-  fn select_word_at(&self, index: usize) -> (usize, usize) {
-    Cursor::find_word_boundaries(&self.editor.buffer, index)
-  }
-
-  fn select_line_at(&self, index: usize) -> (usize, usize) {
-    let (line, _col) = self.editor.buffer.char_to_line_col(index);
-
-    let start = self.editor.buffer.line_col_to_char(line, 0);
-
-    let end = if line + 1 < self.editor.buffer.line_count() {
-      self.editor.buffer.line_col_to_char(line + 1, 0)
-    } else {
-      self.editor.buffer.len()
-    };
-
-    (start, end)
   }
 
   fn calculate_index_from_position(&self, mouse_pos: Point<Pixels>) -> usize {
@@ -290,155 +252,6 @@ impl DiffEditorView {
     index.min(self.editor.buffer.len())
   }
 
-  fn clear_selection(&mut self) {
-    self.selection_start = None;
-    self.selection_end = None;
-    self.is_selecting = false;
-  }
-
-  /// Delete selected text if any, and position cursor at selection start
-  fn delete_selection(&mut self) {
-    if let Some(range) = self.get_selection_range() {
-      let len = range.end - range.start;
-      self.editor.buffer.delete(range.start, len);
-
-      self.editor.cursor.index = range.start;
-
-      self.clear_selection();
-    }
-  }
-
-  /// Copy selected text to clipboard
-  fn copy_selection(&mut self, cx: &mut Context<Self>) {
-    if let Some(range) = self.get_selection_range() {
-      let text = Self::substring_chars(&self.editor.buffer.as_str(), range.start, range.end);
-      cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
-    }
-  }
-
-  /// Cut selected text to clipboard (copy + delete)
-  fn cut_selection(&mut self, cx: &mut Context<Self>) {
-    if let Some(range) = self.get_selection_range() {
-      let text = Self::substring_chars(&self.editor.buffer.as_str(), range.start, range.end);
-      cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
-
-      self.delete_selection();
-    }
-  }
-
-  /// Paste clipboard content at cursor position
-  fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
-    if let Some(clipboard_item) = cx.read_from_clipboard()
-      && let Some(text) = clipboard_item.text()
-    {
-      self.delete_selection();
-
-      let cursor_pos = self.editor.cursor.index;
-      self.editor.buffer.insert(cursor_pos, &text);
-
-      // Count characters, not bytes
-      self.editor.cursor.index = cursor_pos + text.chars().count();
-    }
-  }
-
-  fn all_selection(&mut self) {
-    self.selection_start = Some(0);
-    self.selection_end = Some(self.editor.buffer.len());
-    self.editor.cursor.index = self.editor.buffer.len();
-  }
-
-  fn extend_selection_left(&mut self) {
-    if self.get_selection_range().is_none() {
-      self.selection_start = Some(self.editor.cursor.index);
-    }
-
-    self.editor.cursor.move_left();
-
-    // Update selection end to new cursor positio
-    self.selection_end = Some(self.editor.cursor.index);
-  }
-
-  fn extend_selection_right(&mut self) {
-    if self.get_selection_range().is_none() {
-      self.selection_start = Some(self.editor.cursor.index);
-    }
-
-    self.editor.cursor.move_right(self.editor.buffer.len());
-    self.selection_end = Some(self.editor.cursor.index);
-  }
-
-  fn extend_selection_up(&mut self) {
-    if self.get_selection_range().is_none() {
-      self.selection_start = Some(self.editor.cursor.index);
-    }
-
-    self.editor.cursor.move_up(&self.editor.buffer);
-    self.selection_end = Some(self.editor.cursor.index);
-  }
-
-  fn extend_selection_down(&mut self) {
-    if self.get_selection_range().is_none() {
-      self.selection_start = Some(self.editor.cursor.index);
-    }
-
-    self.editor.cursor.move_down(&self.editor.buffer);
-    self.selection_end = Some(self.editor.cursor.index);
-  }
-
-  fn extend_selection_to_line_start(&mut self) {
-    if self.get_selection_range().is_none() {
-      self.selection_start = Some(self.editor.cursor.index);
-    }
-
-    self.editor.cursor.move_to_line_start(&self.editor.buffer);
-    self.selection_end = Some(self.editor.cursor.index);
-  }
-
-  fn extend_selection_to_line_end(&mut self) {
-    if self.get_selection_range().is_none() {
-      self.selection_start = Some(self.editor.cursor.index);
-    }
-
-    self.editor.cursor.move_to_line_end(&self.editor.buffer);
-    self.selection_end = Some(self.editor.cursor.index);
-  }
-
-  fn extend_selection_to_buffer_start(&mut self) {
-    if self.get_selection_range().is_none() {
-      self.selection_start = Some(self.editor.cursor.index);
-    }
-
-    self.editor.cursor.move_to_buffer_start();
-    self.selection_end = Some(self.editor.cursor.index);
-  }
-
-  fn extend_selection_to_buffer_end(&mut self) {
-    if self.get_selection_range().is_none() {
-      self.selection_start = Some(self.editor.cursor.index);
-    }
-
-    self.editor.cursor.move_to_buffer_end(&self.editor.buffer);
-    self.selection_end = Some(self.editor.cursor.index);
-  }
-
-  fn extend_selection_word_left(&mut self) {
-    if self.get_selection_range().is_none() {
-      self.selection_start = Some(self.editor.cursor.index);
-    }
-
-    self.editor.cursor.move_word_left(&self.editor.buffer);
-    self.selection_end = Some(self.editor.cursor.index);
-  }
-
-  fn extend_selection_word_right(&mut self) {
-    if self.get_selection_range().is_none() {
-      self.selection_start = Some(self.editor.cursor.index);
-    }
-
-    self.editor.cursor.move_word_right(&self.editor.buffer);
-    self.selection_end = Some(self.editor.cursor.index);
-  }
-
   fn on_key_down(
     self: &mut DiffEditorView,
     event: &KeyDownEvent,
@@ -453,22 +266,30 @@ impl DiffEditorView {
     if cmd_pressed && !shift_pressed && !opt_pressed {
       match event.keystroke.key.as_str() {
         "c" => {
-          self.copy_selection(cx);
+          if let Some(text) = self.editor.copy() {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+          }
           cx.notify();
           return;
         }
         "x" => {
-          self.cut_selection(cx);
+          if let Some(text) = self.editor.cut() {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+          }
           cx.notify();
           return;
         }
         "v" => {
-          self.paste_from_clipboard(cx);
+          if let Some(clipboard_item) = cx.read_from_clipboard()
+            && let Some(text) = clipboard_item.text()
+          {
+            self.editor.paste(&text);
+          }
           cx.notify();
           return;
         }
         "a" => {
-          self.all_selection();
+          self.editor.select_all();
           cx.notify();
           return;
         }
@@ -478,13 +299,13 @@ impl DiffEditorView {
 
     match event.keystroke.key.as_str() {
       "enter" => {
-        self.delete_selection();
+        self.editor.delete_selection();
         self.editor.insert_char('\n');
         cx.notify();
       }
       "backspace" => {
-        if self.get_selection_range().is_some() {
-          self.delete_selection();
+        if self.editor.has_selection() {
+          self.editor.delete_selection();
         } else if cmd_pressed {
           // Cmd+Backspace: delete entire line
           self.editor.delete_line();
@@ -497,93 +318,93 @@ impl DiffEditorView {
         cx.notify();
       }
       "space" => {
-        self.delete_selection();
+        self.editor.delete_selection();
         self.editor.insert_char(' ');
         cx.notify();
       }
       "up" => {
         if cmd_pressed && shift_pressed {
-          self.extend_selection_to_buffer_start();
+          self.editor.extend_selection_to_buffer_start();
         } else if cmd_pressed {
-          self.clear_selection();
+          self.editor.clear_selection();
           self.editor.cursor.move_to_buffer_start();
         } else if opt_pressed && shift_pressed {
           // Option+Shift+Up = same as Shift+Up
-          self.extend_selection_up();
+          self.editor.extend_selection_up();
         } else if opt_pressed {
           // Option+Up = same as Up
-          self.clear_selection();
+          self.editor.clear_selection();
           self.editor.cursor.move_up(&self.editor.buffer);
         } else if shift_pressed {
-          self.extend_selection_up();
+          self.editor.extend_selection_up();
         } else {
-          self.clear_selection();
+          self.editor.clear_selection();
           self.editor.cursor.move_up(&self.editor.buffer);
         }
         cx.notify();
       }
       "down" => {
         if cmd_pressed && shift_pressed {
-          self.extend_selection_to_buffer_end();
+          self.editor.extend_selection_to_buffer_end();
         } else if cmd_pressed {
-          self.clear_selection();
+          self.editor.clear_selection();
           self.editor.cursor.move_to_buffer_end(&self.editor.buffer);
         } else if opt_pressed && shift_pressed {
           // Option+Shift+Down = same as Shift+Down
-          self.extend_selection_down();
+          self.editor.extend_selection_down();
         } else if opt_pressed {
           // Option+Down = same as Down
-          self.clear_selection();
+          self.editor.clear_selection();
           self.editor.cursor.move_down(&self.editor.buffer);
         } else if shift_pressed {
-          self.extend_selection_down();
+          self.editor.extend_selection_down();
         } else {
-          self.clear_selection();
+          self.editor.clear_selection();
           self.editor.cursor.move_down(&self.editor.buffer);
         }
         cx.notify();
       }
       "left" => {
         if cmd_pressed && shift_pressed {
-          self.extend_selection_to_line_start();
+          self.editor.extend_selection_to_line_start();
         } else if cmd_pressed {
-          self.clear_selection();
+          self.editor.clear_selection();
           self.editor.cursor.move_to_line_start(&self.editor.buffer);
         } else if opt_pressed && shift_pressed {
-          self.extend_selection_word_left();
+          self.editor.extend_selection_word_left();
         } else if opt_pressed {
-          self.clear_selection();
+          self.editor.clear_selection();
           self.editor.cursor.move_word_left(&self.editor.buffer);
         } else if shift_pressed {
-          self.extend_selection_left();
+          self.editor.extend_selection_left();
         } else {
-          self.clear_selection();
+          self.editor.clear_selection();
           self.editor.cursor.move_left();
         }
         cx.notify();
       }
       "right" => {
         if cmd_pressed && shift_pressed {
-          self.extend_selection_to_line_end();
+          self.editor.extend_selection_to_line_end();
         } else if cmd_pressed {
-          self.clear_selection();
+          self.editor.clear_selection();
           self.editor.cursor.move_to_line_end(&self.editor.buffer);
         } else if opt_pressed && shift_pressed {
-          self.extend_selection_word_right();
+          self.editor.extend_selection_word_right();
         } else if opt_pressed {
-          self.clear_selection();
+          self.editor.clear_selection();
           self.editor.cursor.move_word_right(&self.editor.buffer);
         } else if shift_pressed {
-          self.extend_selection_right();
+          self.editor.extend_selection_right();
         } else {
-          self.clear_selection();
+          self.editor.clear_selection();
           self.editor.cursor.move_right(self.editor.buffer.len());
         }
         cx.notify();
       }
       key => {
         if let Some(ch) = key.chars().next() {
-          self.delete_selection();
+          self.editor.delete_selection();
           self.editor.insert_char(ch);
           cx.notify();
         }
@@ -602,22 +423,15 @@ impl DiffEditorView {
     match event.click_count {
       1 => {
         self.is_selecting = true;
-        self.selection_start = Some(index);
-        self.selection_end = Some(index);
+        self.editor.select_range(index, index);
         self.editor.cursor.index = index;
       }
       2 => {
-        let (start, end) = self.select_word_at(index);
-        self.selection_start = Some(start);
-        self.selection_end = Some(end);
-        self.editor.cursor.index = end;
+        self.editor.select_word_at(index);
         self.is_selecting = false;
       }
       3 => {
-        let (start, end) = self.select_line_at(index);
-        self.selection_start = Some(start);
-        self.selection_end = Some(end);
-        self.editor.cursor.index = end;
+        self.editor.select_line_at(index);
         self.is_selecting = false;
       }
       _ => {}
@@ -634,7 +448,9 @@ impl DiffEditorView {
   ) {
     if self.is_selecting || event.pressed_button == Some(MouseButton::Left) {
       let index = self.calculate_index_from_position(event.position);
-      self.selection_end = Some(index);
+      if let Some(sel) = &self.editor.selection {
+        self.editor.select_range(sel.tail(), index);
+      }
       self.editor.cursor.index = index;
       cx.notify();
     }
@@ -649,10 +465,15 @@ impl DiffEditorView {
     &mut self,
     _event: &MouseUpEvent,
     _window: &mut Window,
-    cx: &mut Context<Self>,
+    _cx: &mut Context<Self>,
   ) {
     self.is_selecting = false;
-    cx.notify();
+    // Clear empty selections
+    if let Some(range) = self.editor.selection_range()
+      && range.is_empty()
+    {
+      self.editor.clear_selection();
+    }
   }
 
   /// Render using prepaint quads
@@ -781,23 +602,6 @@ mod tests {
   fn test_editor_config_default() {
     let config = EditorConfig::default();
     assert_eq!(config.font_size, 16.0);
-  }
-
-  #[test]
-  fn test_substring_chars_with_emoji() {
-    let text = "hello 🌍 world";
-
-    // Extract emoji
-    let result = DiffEditorView::substring_chars(text, 6, 7);
-    assert_eq!(result, "🌍");
-
-    // Extract around emoji
-    let result = DiffEditorView::substring_chars(text, 5, 8);
-    assert_eq!(result, " 🌍 ");
-
-    // Extract full string
-    let result = DiffEditorView::substring_chars(text, 0, 13);
-    assert_eq!(result, "hello 🌍 world");
   }
 
   #[test]

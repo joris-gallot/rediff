@@ -1,10 +1,51 @@
 use cursor::Cursor;
+use std::ops::Range;
 use text::TextBuffer;
+
+/// Represents a text selection with start and end positions
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Selection {
+  pub start: usize,
+  pub end: usize,
+  pub reversed: bool, // True if selection was made backwards (right to left)
+}
+
+impl Selection {
+  /// Create a new selection from start to end
+  pub fn new(start: usize, end: usize) -> Self {
+    Self {
+      start: start.min(end),
+      end: start.max(end),
+      reversed: start > end,
+    }
+  }
+
+  /// Get the selection as a Range
+  pub fn range(&self) -> Range<usize> {
+    self.start..self.end
+  }
+
+  /// Check if selection is empty (start == end)
+  pub fn is_empty(&self) -> bool {
+    self.start == self.end
+  }
+
+  /// Get the "head" (moving end) of the selection
+  pub fn head(&self) -> usize {
+    if self.reversed { self.start } else { self.end }
+  }
+
+  /// Get the "tail" (anchor/fixed end) of the selection
+  pub fn tail(&self) -> usize {
+    if self.reversed { self.end } else { self.start }
+  }
+}
 
 #[derive(Default)]
 pub struct Editor {
   pub buffer: TextBuffer,
   pub cursor: Cursor,
+  pub selection: Option<Selection>,
 }
 
 impl Editor {
@@ -12,6 +53,219 @@ impl Editor {
     Self {
       buffer: TextBuffer::new(),
       cursor: Cursor::new(),
+      selection: None,
+    }
+  }
+
+  /// Check if there's an active selection
+  pub fn has_selection(&self) -> bool {
+    self.selection.is_some()
+  }
+
+  /// Get the current selection range
+  pub fn selection_range(&self) -> Option<Range<usize>> {
+    self.selection.as_ref().map(|s| s.range())
+  }
+
+  /// Set selection from start to end
+  pub fn select_range(&mut self, start: usize, end: usize) {
+    self.selection = Some(Selection::new(start, end));
+  }
+
+  /// Select all text in buffer
+  pub fn select_all(&mut self) {
+    self.selection = Some(Selection::new(0, self.buffer.len()));
+  }
+
+  /// Clear the current selection
+  pub fn clear_selection(&mut self) {
+    self.selection = None;
+  }
+
+  /// Delete the selected text and return it
+  pub fn delete_selection(&mut self) -> Option<String> {
+    if let Some(range) = self.selection_range() {
+      let text = self.get_selected_text();
+      let len = range.end - range.start;
+      self.buffer.delete(range.start, len);
+      self.cursor.index = range.start;
+      self.clear_selection();
+      text
+    } else {
+      None
+    }
+  }
+
+  /// Get the currently selected text
+  pub fn get_selected_text(&self) -> Option<String> {
+    if let Some(range) = self.selection_range() {
+      let text = self.buffer.as_str();
+      let selected: String = text
+        .chars()
+        .skip(range.start)
+        .take(range.end - range.start)
+        .collect();
+      Some(selected)
+    } else {
+      None
+    }
+  }
+
+  /// Replace the selected text with new content
+  pub fn replace_selection(&mut self, replacement: &str) {
+    if self.selection_range().is_some() {
+      self.delete_selection();
+    }
+    for ch in replacement.chars() {
+      self.insert_char(ch);
+    }
+  }
+
+  /// Select word at the given index
+  pub fn select_word_at(&mut self, index: usize) {
+    let (start, end) = Cursor::find_word_boundaries(&self.buffer, index);
+    self.select_range(start, end);
+  }
+
+  /// Select entire line at the given index
+  pub fn select_line_at(&mut self, index: usize) {
+    let (line, _col) = self.buffer.char_to_line_col(index);
+    let start = self.buffer.line_col_to_char(line, 0);
+    let end = if line + 1 < self.buffer.line_count() {
+      self.buffer.line_col_to_char(line + 1, 0)
+    } else {
+      self.buffer.len()
+    };
+    self.select_range(start, end);
+  }
+
+  /// Extend selection left by one character
+  pub fn extend_selection_left(&mut self) {
+    if self.selection.is_none() {
+      self.selection = Some(Selection::new(self.cursor.index, self.cursor.index));
+    }
+    self.cursor.move_left();
+    if let Some(sel) = &mut self.selection {
+      *sel = Selection::new(sel.tail(), self.cursor.index);
+    }
+  }
+
+  /// Extend selection right by one character
+  pub fn extend_selection_right(&mut self) {
+    if self.selection.is_none() {
+      self.selection = Some(Selection::new(self.cursor.index, self.cursor.index));
+    }
+    self.cursor.move_right(self.buffer.len());
+    if let Some(sel) = &mut self.selection {
+      *sel = Selection::new(sel.tail(), self.cursor.index);
+    }
+  }
+
+  /// Extend selection up by one line
+  pub fn extend_selection_up(&mut self) {
+    if self.selection.is_none() {
+      self.selection = Some(Selection::new(self.cursor.index, self.cursor.index));
+    }
+    self.cursor.move_up(&self.buffer);
+    if let Some(sel) = &mut self.selection {
+      *sel = Selection::new(sel.tail(), self.cursor.index);
+    }
+  }
+
+  /// Extend selection down by one line
+  pub fn extend_selection_down(&mut self) {
+    if self.selection.is_none() {
+      self.selection = Some(Selection::new(self.cursor.index, self.cursor.index));
+    }
+    self.cursor.move_down(&self.buffer);
+    if let Some(sel) = &mut self.selection {
+      *sel = Selection::new(sel.tail(), self.cursor.index);
+    }
+  }
+
+  /// Extend selection to start of current line
+  pub fn extend_selection_to_line_start(&mut self) {
+    if self.selection.is_none() {
+      self.selection = Some(Selection::new(self.cursor.index, self.cursor.index));
+    }
+    self.cursor.move_to_line_start(&self.buffer);
+    if let Some(sel) = &mut self.selection {
+      *sel = Selection::new(sel.tail(), self.cursor.index);
+    }
+  }
+
+  /// Extend selection to end of current line
+  pub fn extend_selection_to_line_end(&mut self) {
+    if self.selection.is_none() {
+      self.selection = Some(Selection::new(self.cursor.index, self.cursor.index));
+    }
+    self.cursor.move_to_line_end(&self.buffer);
+    if let Some(sel) = &mut self.selection {
+      *sel = Selection::new(sel.tail(), self.cursor.index);
+    }
+  }
+
+  /// Extend selection to start of buffer
+  pub fn extend_selection_to_buffer_start(&mut self) {
+    if self.selection.is_none() {
+      self.selection = Some(Selection::new(self.cursor.index, self.cursor.index));
+    }
+    self.cursor.move_to_buffer_start();
+    if let Some(sel) = &mut self.selection {
+      *sel = Selection::new(sel.tail(), self.cursor.index);
+    }
+  }
+
+  /// Extend selection to end of buffer
+  pub fn extend_selection_to_buffer_end(&mut self) {
+    if self.selection.is_none() {
+      self.selection = Some(Selection::new(self.cursor.index, self.cursor.index));
+    }
+    self.cursor.move_to_buffer_end(&self.buffer);
+    if let Some(sel) = &mut self.selection {
+      *sel = Selection::new(sel.tail(), self.cursor.index);
+    }
+  }
+
+  /// Extend selection left by one word
+  pub fn extend_selection_word_left(&mut self) {
+    if self.selection.is_none() {
+      self.selection = Some(Selection::new(self.cursor.index, self.cursor.index));
+    }
+    self.cursor.move_word_left(&self.buffer);
+    if let Some(sel) = &mut self.selection {
+      *sel = Selection::new(sel.tail(), self.cursor.index);
+    }
+  }
+
+  /// Extend selection right by one word
+  pub fn extend_selection_word_right(&mut self) {
+    if self.selection.is_none() {
+      self.selection = Some(Selection::new(self.cursor.index, self.cursor.index));
+    }
+    self.cursor.move_word_right(&self.buffer);
+    if let Some(sel) = &mut self.selection {
+      *sel = Selection::new(sel.tail(), self.cursor.index);
+    }
+  }
+
+  /// Copy selected text (returns text for clipboard)
+  pub fn copy(&self) -> Option<String> {
+    self.get_selected_text()
+  }
+
+  /// Cut selected text (copy + delete, returns text for clipboard)
+  pub fn cut(&mut self) -> Option<String> {
+    self.delete_selection()
+  }
+
+  /// Paste text at cursor (or replace selection)
+  pub fn paste(&mut self, text: &str) {
+    if self.has_selection() {
+      self.delete_selection();
+    }
+    for ch in text.chars() {
+      self.insert_char(ch);
     }
   }
 
@@ -728,5 +982,341 @@ mod tests {
     editor.delete_line();
     assert_eq!(editor.buffer.as_str(), "");
     assert_eq!(editor.cursor.index, 0);
+  }
+
+  #[test]
+  fn test_delete_selection() {
+    let mut editor = Editor::new();
+    for ch in "Hello World".chars() {
+      editor.insert_char(ch);
+    }
+
+    editor.select_range(0, 5); // Select "Hello"
+    let deleted = editor.delete_selection();
+    assert_eq!(deleted, Some("Hello".to_string()));
+    assert_eq!(editor.buffer.as_str(), " World");
+    assert_eq!(editor.cursor.index, 0);
+    assert!(!editor.has_selection());
+  }
+
+  #[test]
+  fn test_delete_selection_none() {
+    let mut editor = Editor::new();
+    for ch in "Hello".chars() {
+      editor.insert_char(ch);
+    }
+
+    let deleted = editor.delete_selection();
+    assert_eq!(deleted, None);
+    assert_eq!(editor.buffer.as_str(), "Hello");
+  }
+
+  #[test]
+  fn test_get_selected_text() {
+    let mut editor = Editor::new();
+    for ch in "Hello World".chars() {
+      editor.insert_char(ch);
+    }
+
+    editor.select_range(6, 11); // Select "World"
+    assert_eq!(editor.get_selected_text(), Some("World".to_string()));
+  }
+
+  #[test]
+  fn test_get_selected_text_none() {
+    let mut editor = Editor::new();
+    for ch in "Hello".chars() {
+      editor.insert_char(ch);
+    }
+
+    assert_eq!(editor.get_selected_text(), None);
+  }
+
+  #[test]
+  fn test_replace_selection() {
+    let mut editor = Editor::new();
+    for ch in "Hello World".chars() {
+      editor.insert_char(ch);
+    }
+
+    editor.select_range(6, 11); // Select "World"
+    editor.replace_selection("Rust");
+    assert_eq!(editor.buffer.as_str(), "Hello Rust");
+    assert!(!editor.has_selection());
+  }
+
+  #[test]
+  fn test_select_word_at() {
+    let mut editor = Editor::new();
+    for ch in "Hello World Test".chars() {
+      editor.insert_char(ch);
+    }
+
+    editor.select_word_at(7); // Middle of "World"
+    assert_eq!(editor.selection_range(), Some(6..11));
+    assert_eq!(editor.get_selected_text(), Some("World".to_string()));
+  }
+
+  #[test]
+  fn test_select_line_at() {
+    let mut editor = Editor::new();
+    for ch in "Line 1\nLine 2\nLine 3".chars() {
+      editor.insert_char(ch);
+    }
+
+    editor.select_line_at(10); // In "Line 2"
+    let selected = editor.get_selected_text();
+    assert_eq!(selected, Some("Line 2\n".to_string()));
+  }
+
+  #[test]
+  fn test_select_line_at_last_line() {
+    let mut editor = Editor::new();
+    for ch in "Line 1\nLine 2".chars() {
+      editor.insert_char(ch);
+    }
+
+    editor.select_line_at(10); // In "Line 2" (last line)
+    let selected = editor.get_selected_text();
+    assert_eq!(selected, Some("Line 2".to_string()));
+  }
+
+  #[test]
+  fn test_copy() {
+    let mut editor = Editor::new();
+    for ch in "Hello World".chars() {
+      editor.insert_char(ch);
+    }
+
+    editor.select_range(0, 5); // Select "Hello"
+    let copied = editor.copy();
+    assert_eq!(copied, Some("Hello".to_string()));
+    assert_eq!(editor.buffer.as_str(), "Hello World"); // Original unchanged
+    assert!(editor.has_selection()); // Selection preserved
+  }
+
+  #[test]
+  fn test_copy_none() {
+    let editor = Editor::new();
+    assert_eq!(editor.copy(), None);
+  }
+
+  #[test]
+  fn test_cut() {
+    let mut editor = Editor::new();
+    for ch in "Hello World".chars() {
+      editor.insert_char(ch);
+    }
+
+    editor.select_range(0, 5); // Select "Hello"
+    let cut = editor.cut();
+    assert_eq!(cut, Some("Hello".to_string()));
+    assert_eq!(editor.buffer.as_str(), " World");
+    assert!(!editor.has_selection());
+  }
+
+  #[test]
+  fn test_cut_none() {
+    let mut editor = Editor::new();
+    assert_eq!(editor.cut(), None);
+  }
+
+  #[test]
+  fn test_paste() {
+    let mut editor = Editor::new();
+    for ch in "Hello".chars() {
+      editor.insert_char(ch);
+    }
+
+    editor.cursor.index = 5;
+    editor.paste(" World");
+    assert_eq!(editor.buffer.as_str(), "Hello World");
+  }
+
+  #[test]
+  fn test_paste_replace_selection() {
+    let mut editor = Editor::new();
+    for ch in "Hello World".chars() {
+      editor.insert_char(ch);
+    }
+
+    editor.select_range(6, 11); // Select "World"
+    editor.paste("Rust");
+    assert_eq!(editor.buffer.as_str(), "Hello Rust");
+    assert!(!editor.has_selection());
+  }
+
+  #[test]
+  fn test_extend_selection_right() {
+    let mut editor = Editor::new();
+    for ch in "Hello World".chars() {
+      editor.insert_char(ch);
+    }
+    editor.cursor.index = 0;
+
+    editor.extend_selection_right();
+    assert_eq!(editor.selection_range(), Some(0..1));
+
+    editor.extend_selection_right();
+    assert_eq!(editor.selection_range(), Some(0..2));
+  }
+
+  #[test]
+  fn test_extend_selection_left() {
+    let mut editor = Editor::new();
+    for ch in "Hello".chars() {
+      editor.insert_char(ch);
+    }
+    editor.cursor.index = 5;
+
+    editor.extend_selection_left();
+    assert_eq!(editor.selection_range(), Some(4..5));
+
+    editor.extend_selection_left();
+    assert_eq!(editor.selection_range(), Some(3..5));
+  }
+
+  #[test]
+  fn test_extend_selection_multi_line() {
+    let mut editor = Editor::new();
+    for ch in "Line 1\nLine 2\nLine 3".chars() {
+      editor.insert_char(ch);
+    }
+    editor.cursor.index = 7; // Start of "Line 2"
+
+    editor.extend_selection_down();
+    assert_eq!(editor.selection_range(), Some(7..14)); // To start of "Line 3"
+  }
+
+  #[test]
+  fn test_extend_selection_to_line_end() {
+    let mut editor = Editor::new();
+    for ch in "Hello World".chars() {
+      editor.insert_char(ch);
+    }
+    editor.cursor.index = 0;
+
+    editor.extend_selection_to_line_end();
+    assert_eq!(editor.selection_range(), Some(0..11));
+  }
+
+  #[test]
+  fn test_extend_selection_word_right() {
+    let mut editor = Editor::new();
+    for ch in "Hello World Test".chars() {
+      editor.insert_char(ch);
+    }
+    editor.cursor.index = 0;
+
+    editor.extend_selection_word_right();
+    assert_eq!(editor.selection_range(), Some(0..5)); // "Hello"
+  }
+
+  #[test]
+  fn test_extend_selection_preserves_anchor() {
+    let mut editor = Editor::new();
+    for ch in "Hello World".chars() {
+      editor.insert_char(ch);
+    }
+    editor.cursor.index = 5;
+
+    editor.extend_selection_right();
+    editor.extend_selection_right();
+    assert_eq!(editor.selection_range(), Some(5..7));
+
+    // Now extend left - should contract
+    editor.extend_selection_left();
+    assert_eq!(editor.selection_range(), Some(5..6));
+  }
+
+  #[test]
+  fn test_selection_new() {
+    let sel = Selection::new(5, 10);
+    assert_eq!(sel.start, 5);
+    assert_eq!(sel.end, 10);
+    assert!(!sel.reversed);
+  }
+
+  #[test]
+  fn test_selection_new_reversed() {
+    let sel = Selection::new(10, 5);
+    assert_eq!(sel.start, 5);
+    assert_eq!(sel.end, 10);
+    assert!(sel.reversed);
+  }
+
+  #[test]
+  fn test_selection_range() {
+    let sel = Selection::new(5, 10);
+    let range = sel.range();
+    assert_eq!(range.start, 5);
+    assert_eq!(range.end, 10);
+  }
+
+  #[test]
+  fn test_selection_is_empty() {
+    let sel1 = Selection::new(5, 5);
+    assert!(sel1.is_empty());
+
+    let sel2 = Selection::new(5, 10);
+    assert!(!sel2.is_empty());
+  }
+
+  #[test]
+  fn test_selection_head_tail_forward() {
+    let sel = Selection::new(5, 10);
+    assert_eq!(sel.head(), 10); // Moving end
+    assert_eq!(sel.tail(), 5); // Anchor
+  }
+
+  #[test]
+  fn test_selection_head_tail_reversed() {
+    let sel = Selection::new(10, 5);
+    assert_eq!(sel.head(), 5); // Moving end (at start because reversed)
+    assert_eq!(sel.tail(), 10); // Anchor (at end because reversed)
+  }
+
+  #[test]
+  fn test_editor_has_selection() {
+    let mut editor = Editor::new();
+    assert!(!editor.has_selection());
+
+    editor.select_range(0, 5);
+    assert!(editor.has_selection());
+
+    editor.clear_selection();
+    assert!(!editor.has_selection());
+  }
+
+  #[test]
+  fn test_editor_selection_range() {
+    let mut editor = Editor::new();
+    assert_eq!(editor.selection_range(), None);
+
+    editor.select_range(5, 10);
+    assert_eq!(editor.selection_range(), Some(5..10));
+  }
+
+  #[test]
+  fn test_editor_select_all() {
+    let mut editor = Editor::new();
+    for ch in "Hello World".chars() {
+      editor.insert_char(ch);
+    }
+
+    editor.select_all();
+    assert!(editor.has_selection());
+    assert_eq!(editor.selection_range(), Some(0..11));
+  }
+
+  #[test]
+  fn test_editor_clear_selection() {
+    let mut editor = Editor::new();
+    editor.select_range(0, 5);
+    assert!(editor.has_selection());
+
+    editor.clear_selection();
+    assert!(!editor.has_selection());
+    assert_eq!(editor.selection_range(), None);
   }
 }
