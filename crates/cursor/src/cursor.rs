@@ -180,11 +180,9 @@ impl Cursor {
   ///
   /// # Examples
   ///
-  /// ```ignore
   /// // "hello world" at position 2 returns (0, 5) for "hello"
   /// // "hello 🌍 world" at position 6 returns (6, 7) for "🌍"
   /// // "hello 🌍 world" at position 5 returns (5, 6) for " " (space before emoji)
-  /// ```
   pub fn find_word_boundaries(buffer: &TextBuffer, position: usize) -> (usize, usize) {
     let text = buffer.as_str();
     let chars: Vec<char> = text.chars().collect();
