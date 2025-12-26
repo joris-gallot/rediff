@@ -286,10 +286,7 @@ impl DiffEditorView {
       self.selection_start = Some(self.editor.cursor.index);
     }
 
-    self
-      .editor
-      .cursor
-      .move_to_buffer_end(self.editor.buffer.len());
+    self.editor.cursor.move_to_buffer_end(&self.editor.buffer);
     self.selection_end = Some(self.editor.cursor.index);
   }
 
@@ -399,10 +396,7 @@ impl DiffEditorView {
           self.extend_selection_to_buffer_end();
         } else if cmd_pressed {
           self.clear_selection();
-          self
-            .editor
-            .cursor
-            .move_to_buffer_end(self.editor.buffer.len());
+          self.editor.cursor.move_to_buffer_end(&self.editor.buffer);
         } else if opt_pressed && shift_pressed {
           // Option+Shift+Down = same as Shift+Down
           self.extend_selection_down();

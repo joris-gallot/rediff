@@ -24,29 +24,50 @@
 
 use super::buffer::TextBuffer;
 
+/// Tracks the desired horizontal position during vertical movement
+#[derive(Default, Copy, Clone, Debug, PartialEq)]
+pub enum CursorGoal {
+  #[default]
+  None,
+  Column(usize),
+}
+
 pub struct Cursor {
   pub index: usize,
+  pub goal: CursorGoal,
 }
 
 impl Cursor {
   pub fn new() -> Self {
-    Self { index: 0 }
+    Self {
+      index: 0,
+      goal: CursorGoal::None,
+    }
   }
 
   pub fn move_left(&mut self) {
     if self.index > 0 {
       self.index -= 1;
     }
+
+    self.goal = CursorGoal::None;
   }
 
   pub fn move_right(&mut self, max: usize) {
     if self.index < max {
       self.index += 1;
     }
+
+    self.goal = CursorGoal::None;
   }
 
   pub fn move_up(&mut self, buffer: &TextBuffer) {
     let (line, col) = buffer.char_to_line_col(self.index);
+
+    let goal_col = match self.goal {
+      CursorGoal::None => col,
+      CursorGoal::Column(c) => c,
+    };
 
     if line > 0 {
       let new_line = line - 1;
@@ -54,15 +75,22 @@ impl Cursor {
         .line(new_line)
         .map(|l| l.trim_end_matches('\n').chars().count())
         .unwrap_or(0);
-      let new_col = col.min(line_len);
+      let new_col = goal_col.min(line_len);
       self.index = buffer.line_col_to_char(new_line, new_col);
     } else {
       self.index = 0;
     }
+
+    self.goal = CursorGoal::Column(goal_col);
   }
 
   pub fn move_down(&mut self, buffer: &TextBuffer) {
     let (line, col) = buffer.char_to_line_col(self.index);
+
+    let goal_col = match self.goal {
+      CursorGoal::None => col,
+      CursorGoal::Column(c) => c,
+    };
 
     if line < buffer.line_count() - 1 {
       let new_line = line + 1;
@@ -70,19 +98,23 @@ impl Cursor {
         .line(new_line)
         .map(|l| l.trim_end_matches('\n').chars().count())
         .unwrap_or(0);
-      let new_col = col.min(line_len);
+      let new_col = goal_col.min(line_len);
       self.index = buffer.line_col_to_char(new_line, new_col);
     } else {
       self.index = buffer.len();
     }
+
+    self.goal = CursorGoal::Column(goal_col);
   }
 
   pub fn move_to_line_start(&mut self, buffer: &TextBuffer) {
+    self.goal = CursorGoal::None;
     let (line, _col) = buffer.char_to_line_col(self.index);
     self.index = buffer.line_col_to_char(line, 0);
   }
 
   pub fn move_to_line_end(&mut self, buffer: &TextBuffer) {
+    self.goal = CursorGoal::None;
     let (line, _col) = buffer.char_to_line_col(self.index);
     let line_len = buffer
       .line(line)
@@ -93,15 +125,18 @@ impl Cursor {
 
   pub fn move_to_buffer_start(&mut self) {
     self.index = 0;
+    self.goal = CursorGoal::None;
   }
 
-  pub fn move_to_buffer_end(&mut self, buffer_len: usize) {
-    self.index = buffer_len;
+  pub fn move_to_buffer_end(&mut self, buffer: &TextBuffer) {
+    self.index = buffer.len();
+    self.goal = CursorGoal::None;
   }
 
   /// Move to previous word boundary (stop at each transition)
   /// Does not move across line boundaries unless at the start of a line
   pub fn move_word_left(&mut self, buffer: &TextBuffer) {
+    self.goal = CursorGoal::None;
     if self.index == 0 {
       return;
     }
@@ -234,6 +269,7 @@ impl Cursor {
   /// Move to next word boundary (stop at each transition)
   /// Does not move across line boundaries
   pub fn move_word_right(&mut self, buffer: &TextBuffer) {
+    self.goal = CursorGoal::None;
     let text = buffer.as_str();
     let chars: Vec<char> = text.chars().collect();
     let text_len = chars.len();
@@ -418,7 +454,8 @@ mod tests {
   fn test_move_to_line_start() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "hello world");
-    let mut cursor = Cursor { index: 5 };
+    let mut cursor = Cursor::new();
+    cursor.index = 5;
 
     cursor.move_to_line_start(&buffer);
     assert_eq!(cursor.index, 0);
@@ -428,7 +465,8 @@ mod tests {
   fn test_move_to_line_start_multiline() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "line1\nline2\nline3");
-    let mut cursor = Cursor { index: 14 }; // middle of line3
+    let mut cursor = Cursor::new();
+    cursor.index = 14; // middle of line3
 
     cursor.move_to_line_start(&buffer);
     assert_eq!(cursor.index, 12); // start of line3
@@ -438,7 +476,8 @@ mod tests {
   fn test_move_to_line_end() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "hello world");
-    let mut cursor = Cursor { index: 5 };
+    let mut cursor = Cursor::new();
+    cursor.index = 5;
 
     cursor.move_to_line_end(&buffer);
     assert_eq!(cursor.index, 11);
@@ -448,7 +487,8 @@ mod tests {
   fn test_move_to_line_end_multiline() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "line1\nline2\nline3");
-    let mut cursor = Cursor { index: 8 }; // middle of line2
+    let mut cursor = Cursor::new();
+    cursor.index = 8; // middle of line2
 
     cursor.move_to_line_end(&buffer);
     assert_eq!(cursor.index, 11); // end of line2 (before \n)
@@ -458,7 +498,8 @@ mod tests {
   fn test_move_to_line_end_excludes_newline() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "hello\nworld");
-    let mut cursor = Cursor { index: 2 }; // in "hello"
+    let mut cursor = Cursor::new();
+    cursor.index = 2; // in "hello"
 
     cursor.move_to_line_end(&buffer);
     assert_eq!(cursor.index, 5); // before \n, not at 6 (which is \n)
@@ -466,23 +507,28 @@ mod tests {
 
   #[test]
   fn test_move_to_buffer_start() {
-    let mut cursor = Cursor { index: 100 };
+    let mut cursor = Cursor::new();
+    cursor.index = 100;
     cursor.move_to_buffer_start();
     assert_eq!(cursor.index, 0);
   }
 
   #[test]
   fn test_move_to_buffer_end() {
-    let mut cursor = Cursor { index: 5 };
-    cursor.move_to_buffer_end(100);
-    assert_eq!(cursor.index, 100);
+    let mut buffer = TextBuffer::new();
+    buffer.insert(0, "hello world\ntest");
+    let mut cursor = Cursor::new();
+    cursor.index = 5;
+    cursor.move_to_buffer_end(&buffer);
+    assert_eq!(cursor.index, buffer.len());
+    assert_eq!(cursor.goal, CursorGoal::None);
   }
 
   #[test]
   fn test_move_to_line_start_already_at_start() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "hello world");
-    let mut cursor = Cursor { index: 0 };
+    let mut cursor = Cursor::new();
 
     cursor.move_to_line_start(&buffer);
     assert_eq!(cursor.index, 0);
@@ -492,7 +538,8 @@ mod tests {
   fn test_move_to_line_end_already_at_end() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "hello world");
-    let mut cursor = Cursor { index: 11 };
+    let mut cursor = Cursor::new();
+    cursor.index = 11;
 
     cursor.move_to_line_end(&buffer);
     assert_eq!(cursor.index, 11);
@@ -502,7 +549,8 @@ mod tests {
   fn test_move_to_line_start_empty_line() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "line1\n\nline3");
-    let mut cursor = Cursor { index: 6 }; // on empty line
+    let mut cursor = Cursor::new();
+    cursor.index = 6; // on empty line
 
     cursor.move_to_line_start(&buffer);
     assert_eq!(cursor.index, 6); // stays at start of empty line
@@ -512,7 +560,8 @@ mod tests {
   fn test_move_to_line_end_empty_line() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "line1\n\nline3");
-    let mut cursor = Cursor { index: 6 }; // on empty line
+    let mut cursor = Cursor::new();
+    cursor.index = 6; // on empty line
 
     cursor.move_to_line_end(&buffer);
     assert_eq!(cursor.index, 6); // stays at same position (line is empty)
@@ -522,7 +571,7 @@ mod tests {
   fn test_move_word_right_simple() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "hello world");
-    let mut cursor = Cursor { index: 0 };
+    let mut cursor = Cursor::new();
 
     // From start of "hello" to end of "hello"
     cursor.move_word_right(&buffer);
@@ -541,7 +590,8 @@ mod tests {
   fn test_move_word_left_simple() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "hello world");
-    let mut cursor = Cursor { index: 11 }; // End of "world"
+    let mut cursor = Cursor::new();
+    cursor.index = 11; // End of "world"
 
     // From end of "world" to start of "world"
     cursor.move_word_left(&buffer);
@@ -560,7 +610,7 @@ mod tests {
   fn test_move_word_right_with_punctuation() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "hello.world");
-    let mut cursor = Cursor { index: 0 };
+    let mut cursor = Cursor::new();
 
     cursor.move_word_right(&buffer);
     assert_eq!(cursor.index, 5); // End of "hello"
@@ -576,7 +626,7 @@ mod tests {
   fn test_move_word_right_multiple_spaces() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "hello   world");
-    let mut cursor = Cursor { index: 0 };
+    let mut cursor = Cursor::new();
 
     cursor.move_word_right(&buffer);
     assert_eq!(cursor.index, 5); // End of "hello"
@@ -592,7 +642,7 @@ mod tests {
   fn test_word_movement_example() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "Word Movement Examples");
-    let mut cursor = Cursor { index: 0 };
+    let mut cursor = Cursor::new();
 
     // Position 0 -> 4 (end of "Word")
     cursor.move_word_right(&buffer);
@@ -637,7 +687,7 @@ mod tests {
   fn test_move_word_boundaries_underscore() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "foo_bar");
-    let mut cursor = Cursor { index: 0 };
+    let mut cursor = Cursor::new();
 
     cursor.move_word_right(&buffer);
     assert_eq!(cursor.index, 7); // "foo_bar" is one word (underscore is word char)
@@ -647,7 +697,7 @@ mod tests {
   fn test_move_word_at_boundaries() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "hello world");
-    let mut cursor = Cursor { index: 0 };
+    let mut cursor = Cursor::new();
 
     // At start
     cursor.move_word_left(&buffer);
@@ -663,7 +713,7 @@ mod tests {
   fn test_move_word_with_newlines() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "hello\nworld");
-    let mut cursor = Cursor { index: 0 };
+    let mut cursor = Cursor::new();
 
     // 0 -> 5 (end of "hello")
     cursor.move_word_right(&buffer);
@@ -818,7 +868,8 @@ mod tests {
   fn test_move_word_left_stops_at_line_boundary() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "line1\nline2\nline3");
-    let mut cursor = Cursor { index: 17 }; // End of "line3"
+    let mut cursor = Cursor::new();
+    cursor.index = 17; // End of "line3"
 
     // Move word left should stop at "line" on same line
     cursor.move_word_left(&buffer);
@@ -838,7 +889,8 @@ mod tests {
   fn test_move_word_right_stops_at_line_boundary() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "line1\nline2\nline3");
-    let mut cursor = Cursor { index: 0 }; // Start of "line1"
+    let mut cursor = Cursor::new();
+    // Start of "line1"
 
     // Move word right
     cursor.move_word_right(&buffer);
@@ -858,11 +910,149 @@ mod tests {
   fn test_move_word_with_emoji_stops_at_line() {
     let mut buffer = TextBuffer::new();
     buffer.insert(0, "word\n🌍🌍\ntest");
-    let mut cursor = Cursor { index: 7 }; // After emoji on line 2
+    let mut cursor = Cursor::new();
+    cursor.index = 7; // After emoji on line 2
 
     // Move left should stop at start of line, not cross to "word"
     cursor.move_word_left(&buffer);
     assert_eq!(cursor.index, 5); // Start of line 2 (after newline)
+  }
+
+  #[test]
+  fn test_cursor_goal_preserves_column() {
+    let mut buffer = TextBuffer::new();
+    buffer.insert(0, "hello world\nhi\nhello again");
+    let mut cursor = Cursor::new();
+    cursor.index = 8; // column 8 on line 1 ("hello world")
+
+    // Move down to shorter line "hi"
+    cursor.move_down(&buffer);
+    assert_eq!(cursor.index, 14); // end of "hi" (column 2)
+    assert_eq!(cursor.goal, CursorGoal::Column(8)); // goal is preserved
+
+    // Move down again to "hello again" - should return to column 8
+    cursor.move_down(&buffer);
+    assert_eq!(cursor.index, 23); // column 8 of "hello again"
+    assert_eq!(cursor.goal, CursorGoal::Column(8));
+  }
+
+  #[test]
+  fn test_cursor_goal_resets_on_horizontal_movement() {
+    let mut buffer = TextBuffer::new();
+    buffer.insert(0, "hello world\nhi\nhello again");
+    let mut cursor = Cursor::new();
+    cursor.index = 8;
+
+    // Move down to establish a goal
+    cursor.move_down(&buffer);
+    assert_eq!(cursor.goal, CursorGoal::Column(8));
+
+    // Move left should reset goal
+    cursor.move_left();
+    assert_eq!(cursor.goal, CursorGoal::None);
+
+    // Move down again - should use current column, not old goal
+    let (_line, col) = buffer.char_to_line_col(cursor.index);
+    cursor.move_down(&buffer);
+    let new_goal = match cursor.goal {
+      CursorGoal::Column(c) => c,
+      CursorGoal::None => 0,
+    };
+    assert_eq!(new_goal, col);
+  }
+
+  #[test]
+  fn test_cursor_goal_up_then_down() {
+    let mut buffer = TextBuffer::new();
+    buffer.insert(0, "hello world\nhi\nhello again");
+    let mut cursor = Cursor::new();
+    cursor.index = 23; // column 8 on line 3 ("hello again")
+
+    // Move up to shorter line "hi"
+    cursor.move_up(&buffer);
+    assert_eq!(cursor.index, 14); // end of "hi" (column 2)
+    assert_eq!(cursor.goal, CursorGoal::Column(8));
+
+    // Move up again to "hello world" - should return to column 8
+    cursor.move_up(&buffer);
+    assert_eq!(cursor.index, 8); // column 8 of "hello world"
+    assert_eq!(cursor.goal, CursorGoal::Column(8));
+  }
+
+  #[test]
+  fn test_cursor_goal_multiple_short_lines() {
+    let mut buffer = TextBuffer::new();
+    buffer.insert(0, "hello world\na\nb\nc\nhello again");
+    let mut cursor = Cursor::new();
+    cursor.index = 8; // column 8 on line 1
+
+    // Move down through multiple short lines
+    cursor.move_down(&buffer);
+    assert_eq!(cursor.index, 13); // end of "a"
+    assert_eq!(cursor.goal, CursorGoal::Column(8));
+
+    cursor.move_down(&buffer);
+    assert_eq!(cursor.index, 15); // end of "b"
+    assert_eq!(cursor.goal, CursorGoal::Column(8));
+
+    cursor.move_down(&buffer);
+    assert_eq!(cursor.index, 17); // end of "c"
+    assert_eq!(cursor.goal, CursorGoal::Column(8));
+
+    // Finally reach a long line - should return to column 8
+    cursor.move_down(&buffer);
+    assert_eq!(cursor.index, 26); // column 8 of "hello again"
+    assert_eq!(cursor.goal, CursorGoal::Column(8));
+  }
+
+  #[test]
+  fn test_cursor_goal_resets_on_line_start_end() {
+    let mut buffer = TextBuffer::new();
+    buffer.insert(0, "hello world\nhi\nhello again");
+    let mut cursor = Cursor::new();
+    cursor.index = 8;
+
+    // Establish a goal
+    cursor.move_down(&buffer);
+    assert_eq!(cursor.goal, CursorGoal::Column(8));
+
+    // Move to line start should reset goal
+    cursor.move_to_line_start(&buffer);
+    assert_eq!(cursor.goal, CursorGoal::None);
+
+    // Establish goal again
+    cursor.index = 8;
+    cursor.move_down(&buffer);
+    assert_eq!(cursor.goal, CursorGoal::Column(8));
+
+    // Move to line end should reset goal
+    cursor.move_to_line_end(&buffer);
+    assert_eq!(cursor.goal, CursorGoal::None);
+  }
+
+  #[test]
+  fn test_cursor_goal_resets_on_word_movement() {
+    let mut buffer = TextBuffer::new();
+    buffer.insert(0, "hello world\nhi\nhello again");
+    let mut cursor = Cursor::new();
+    cursor.index = 8;
+
+    // Establish a goal
+    cursor.move_down(&buffer);
+    assert_eq!(cursor.goal, CursorGoal::Column(8));
+
+    // Word movement should reset goal
+    cursor.move_word_left(&buffer);
+    assert_eq!(cursor.goal, CursorGoal::None);
+
+    // Establish goal again
+    cursor.index = 8;
+    cursor.move_down(&buffer);
+    assert_eq!(cursor.goal, CursorGoal::Column(8));
+
+    // Word movement right should also reset goal
+    cursor.move_word_right(&buffer);
+    assert_eq!(cursor.goal, CursorGoal::None);
   }
 
   #[test]
