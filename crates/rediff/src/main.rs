@@ -1,5 +1,3 @@
-
-
 use ui::DiffEditorView;
 
 use gpui::{App, Application, Bounds, WindowBounds, WindowOptions, prelude::*, px, size};
@@ -12,7 +10,7 @@ fn main() {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         ..Default::default()
       },
-      |_, cx| cx.new(|cx| DiffEditorView::new(None, cx)),
+      |_, cx| cx.new(|cx| DiffEditorView::new(None, None, cx)),
     )
     .unwrap();
 

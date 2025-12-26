@@ -1,4 +1,7 @@
 use ropey::Rope;
+use std::fs;
+use std::io;
+use std::path::Path;
 
 #[derive(Debug, Clone, Default)]
 pub struct TextBuffer {
@@ -62,6 +65,19 @@ impl TextBuffer {
       self.rope.len_chars()
     };
     (line_start + col).min(line_end)
+  }
+
+  pub fn from_file(path: &Path) -> io::Result<Self> {
+    let content = fs::read_to_string(path)?;
+    let mut buffer = Self::new();
+    if !content.is_empty() {
+      buffer.insert(0, &content);
+    }
+    Ok(buffer)
+  }
+
+  pub fn save_to_file(&self, path: &Path) -> io::Result<()> {
+    fs::write(path, self.as_str())
   }
 }
 
@@ -211,5 +227,94 @@ mod tests {
     buffer.insert(6, "😀");
     assert_eq!(buffer.as_str(), "Hello 😀🌍 World");
     assert_eq!(buffer.len(), 14);
+  }
+
+  #[test]
+  fn test_from_file() {
+    let temp_dir = std::env::temp_dir();
+    let file_path = temp_dir.join("test_from_file.txt");
+
+    let content = "Line 1\nLine 2\nLine 3";
+    std::fs::write(&file_path, content).unwrap();
+
+    let buffer = TextBuffer::from_file(&file_path).unwrap();
+    assert_eq!(buffer.as_str(), content);
+    assert_eq!(buffer.line_count(), 3);
+
+    std::fs::remove_file(&file_path).ok();
+  }
+
+  #[test]
+  fn test_from_file_empty() {
+    let temp_dir = std::env::temp_dir();
+    let file_path = temp_dir.join("test_from_file_empty.txt");
+
+    std::fs::write(&file_path, "").unwrap();
+
+    let buffer = TextBuffer::from_file(&file_path).unwrap();
+    assert_eq!(buffer.as_str(), "");
+    assert_eq!(buffer.len(), 0);
+
+    std::fs::remove_file(&file_path).ok();
+  }
+
+  #[test]
+  fn test_from_file_not_exists() {
+    let file_path = Path::new("/nonexistent/path/file.txt");
+    let result = TextBuffer::from_file(file_path);
+    assert!(result.is_err());
+  }
+
+  #[test]
+  fn test_save_to_file() {
+    let temp_dir = std::env::temp_dir();
+    let file_path = temp_dir.join("test_save_to_file.txt");
+
+    let mut buffer = TextBuffer::new();
+    buffer.insert(0, "Hello\nWorld\n");
+
+    buffer.save_to_file(&file_path).unwrap();
+
+    let content = std::fs::read_to_string(&file_path).unwrap();
+    assert_eq!(content, "Hello\nWorld\n");
+
+    std::fs::remove_file(&file_path).ok();
+  }
+
+  #[test]
+  fn test_save_to_file_overwrite() {
+    let temp_dir = std::env::temp_dir();
+    let file_path = temp_dir.join("test_save_overwrite.txt");
+
+    std::fs::write(&file_path, "Original content").unwrap();
+
+    let mut buffer = TextBuffer::new();
+    buffer.insert(0, "New content");
+    buffer.save_to_file(&file_path).unwrap();
+
+    let content = std::fs::read_to_string(&file_path).unwrap();
+    assert_eq!(content, "New content");
+
+    std::fs::remove_file(&file_path).ok();
+  }
+
+  #[test]
+  fn test_from_file_then_save() {
+    let temp_dir = std::env::temp_dir();
+    let file_path = temp_dir.join("test_roundtrip.txt");
+
+    let original_content = "Line 1\nLine 2\nLine 3\n";
+    std::fs::write(&file_path, original_content).unwrap();
+
+    let mut buffer = TextBuffer::from_file(&file_path).unwrap();
+    assert_eq!(buffer.as_str(), original_content);
+
+    buffer.insert(buffer.len(), "Line 4\n");
+    buffer.save_to_file(&file_path).unwrap();
+
+    let new_content = std::fs::read_to_string(&file_path).unwrap();
+    assert_eq!(new_content, "Line 1\nLine 2\nLine 3\nLine 4\n");
+
+    std::fs::remove_file(&file_path).ok();
   }
 }

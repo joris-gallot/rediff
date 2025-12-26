@@ -2,11 +2,12 @@ use crate::line_cache::LineCache;
 use crate::line_element::{EditorState, LineConfig, LineElement};
 use editor::Editor;
 use gpui::{
-  App, Context, FocusHandle, Focusable, Font, KeyDownEvent, MouseButton, MouseDownEvent,
-  MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, TextRun, UniformListScrollHandle, Window,
-  black, div, opaque_grey, prelude::*, px, uniform_list, white,
+  App, ClipboardItem, Context, FocusHandle, Focusable, Font, KeyDownEvent, MouseButton,
+  MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, TextRun,
+  UniformListScrollHandle, Window, black, div, opaque_grey, prelude::*, px, uniform_list, white,
 };
 use std::ops::Range;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use text::TextBuffer;
 
@@ -38,25 +39,74 @@ pub struct DiffEditorView {
   is_selecting: bool,
   selection_anchor: Option<usize>,
   line_cache: Arc<Mutex<LineCache>>,
+  file_path: Option<PathBuf>,
+  is_dirty: bool,
+  was_focused: bool,
 }
 
 impl DiffEditorView {
-  pub fn new(config: Option<EditorConfig>, cx: &mut Context<Self>) -> Self {
+  pub fn new(
+    file_path: Option<PathBuf>,
+    config: Option<EditorConfig>,
+    cx: &mut Context<Self>,
+  ) -> Self {
     let focus_handle = cx.focus_handle();
 
+    let editor = if let Some(ref path) = file_path {
+      match TextBuffer::from_file(path) {
+        Ok(buffer) => editor::Editor {
+          buffer,
+          cursor: cursor::Cursor::new(),
+          selection: None,
+        },
+        Err(e) => {
+          eprintln!("Failed to load file: {}", e);
+          editor::Editor::new()
+        }
+      }
+    } else {
+      editor::Editor::new()
+    };
+
     Self {
-      editor: Editor::new(),
+      editor,
       focus_handle,
       config: config.unwrap_or_default(),
       scroll_handle: UniformListScrollHandle::new(),
       is_selecting: false,
       selection_anchor: None,
       line_cache: Arc::new(Mutex::new(LineCache::new())),
+      file_path,
+      is_dirty: false,
+      was_focused: false,
     }
   }
 
   pub fn editor(&mut self) -> &mut Editor {
     &mut self.editor
+  }
+
+  fn mark_dirty(&mut self) {
+    self.is_dirty = true;
+  }
+
+  fn reload_file(&mut self, cx: &mut Context<Self>) {
+    if let Some(ref path) = self.file_path {
+      match TextBuffer::from_file(path) {
+        Ok(buffer) => {
+          let cursor_index = self.editor.cursor.index.min(buffer.len());
+          self.editor.buffer = buffer;
+          self.editor.cursor.index = cursor_index;
+          self.editor.selection = None;
+          self.is_dirty = false;
+          println!("File reloaded: {:?}", path);
+          cx.notify();
+        }
+        Err(e) => {
+          eprintln!("Failed to reload file: {}", e);
+        }
+      }
+    }
   }
 
   fn calculate_index_from_position(&self, mouse_pos: Point<Pixels>, window: &mut Window) -> usize {
@@ -241,6 +291,21 @@ impl DiffEditorView {
     let alt = event.keystroke.modifiers.alt;
 
     match event.keystroke.key.as_str() {
+      "s" if cmd && !shift && !alt => {
+        if let Some(ref path) = self.file_path {
+          match self.editor.buffer.save_to_file(path) {
+            Ok(_) => {
+              self.is_dirty = false;
+              println!("File saved: {:?}", path);
+              cx.notify();
+            }
+            Err(e) => {
+              eprintln!("Failed to save file: {}", e);
+            }
+          }
+        }
+        return;
+      }
       "left" => {
         if cmd && shift {
           self.editor.extend_selection_to_line_start();
@@ -313,22 +378,25 @@ impl DiffEditorView {
         } else {
           self.editor.backspace();
         }
+        self.mark_dirty();
       }
       "enter" => {
         self.editor.delete_selection();
         self.editor.insert_char('\n');
+        self.mark_dirty();
       }
       "a" if cmd => {
         self.editor.select_all();
       }
       "c" if cmd => {
         if let Some(text) = self.editor.copy() {
-          cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+          cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
       }
       "x" if cmd => {
         if let Some(text) = self.editor.cut() {
-          cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+          cx.write_to_clipboard(ClipboardItem::new_string(text));
+          self.mark_dirty();
         }
       }
       "v" if cmd => {
@@ -336,11 +404,13 @@ impl DiffEditorView {
           && let Some(text) = item.text()
         {
           self.editor.paste(&text);
+          self.mark_dirty();
         }
       }
       "space" => {
         self.editor.delete_selection();
         self.editor.insert_char(' ');
+        self.mark_dirty();
       }
       key => {
         if key.len() == 1
@@ -350,6 +420,7 @@ impl DiffEditorView {
         {
           self.editor.delete_selection();
           self.editor.insert_char(c);
+          self.mark_dirty();
         }
       }
     }
@@ -364,7 +435,13 @@ impl Focusable for DiffEditorView {
 }
 
 impl Render for DiffEditorView {
-  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    let is_focused = self.focus_handle.is_focused(window);
+    if is_focused && !self.was_focused && !self.is_dirty {
+      self.reload_file(cx);
+    }
+    self.was_focused = is_focused;
+
     let line_count = self.editor.buffer.line_count();
     let font_size = self.config.font_size;
     let focus_handle = self.focus_handle.clone();
