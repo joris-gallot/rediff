@@ -1,9 +1,9 @@
 use crate::core::{Cursor, Editor};
 
 use gpui::{
-  App, Context, Div, FocusHandle, Focusable, KeyDownEvent, MouseButton, MouseDownEvent,
-  MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollHandle, TextAlign, Window, black, div,
-  opaque_grey, prelude::*, px, rgb, white,
+  App, Context, Div, FocusHandle, Focusable, Font, KeyDownEvent, MouseButton, MouseDownEvent,
+  MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollHandle, ShapedLine, TextAlign,
+  TextRun, Window, black, div, opaque_grey, prelude::*, px, rgb, white,
 };
 
 const LINE_NUMBERS_WIDTH: f32 = 50.0;
@@ -43,6 +43,9 @@ pub struct DiffEditorView {
   is_selecting: bool,
   selection_start: Option<usize>,
   selection_end: Option<usize>,
+
+  // Cache shaped lines for accurate position calculations
+  line_layouts: Vec<ShapedLine>,
 }
 
 impl DiffEditorView {
@@ -57,6 +60,7 @@ impl DiffEditorView {
       is_selecting: false,
       selection_start: None,
       selection_end: None,
+      line_layouts: Vec::new(),
     }
   }
 
@@ -130,36 +134,16 @@ impl DiffEditorView {
     let lines: Vec<&str> = text.split('\n').collect();
 
     if clicked_line >= lines.len() {
-      return self.editor.buffer.len(); // Use buffer.len() which returns char count
+      return self.editor.buffer.len();
     }
 
-    let line = lines[clicked_line];
-    let x_offset = mouse_pos.x - line_numbers_width_px - padding_px;
-
-    // Calculate character widths dynamically
-    // Spaces are rendered narrower, alphanumeric chars are wider
-    let space_width = config.font_size * 0.27; // Approximate space width
-    let char_width = config.font_size * 0.57; // Approximate letter width
-
-    // Find the column by accumulating widths
-    let mut accumulated_width = 0.0;
-    let mut col = 0;
-
-    for (i, ch) in line.chars().enumerate() {
-      let ch_width = if ch == ' ' { space_width } else { char_width };
-
-      // Check if we've passed the click position
-      if accumulated_width + ch_width / 2.0 > x_offset.into() {
-        col = i;
-        break;
-      }
-
-      accumulated_width += ch_width;
-      col = i + 1;
-    }
-
-    let line_char_count = line.chars().count();
-    let col = col.min(line_char_count);
+    let col = if clicked_line < self.line_layouts.len() {
+      let shaped_line = &self.line_layouts[clicked_line];
+      let relative_x = mouse_pos.x - line_numbers_width_px - padding_px - scroll_offset.x;
+      shaped_line.closest_index_for_x(relative_x)
+    } else {
+      0
+    };
 
     // Calculate character index (not byte index)
     let mut index = 0;
@@ -787,11 +771,39 @@ impl Focusable for DiffEditorView {
 }
 
 impl Render for DiffEditorView {
-  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let text = self.editor.buffer.as_str().to_string();
 
-    let lines: Vec<&str> = text.split('\n').collect();
+    let lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();
     let config = &self.config;
+
+    self.line_layouts.clear();
+    let font_size = px(config.font_size);
+
+    let monospace_font = Font {
+      family: "monospace".into(),
+      features: Default::default(),
+      fallbacks: Default::default(),
+      weight: Default::default(),
+      style: Default::default(),
+    };
+
+    for line in &lines {
+      let text_run = TextRun {
+        len: line.len(),
+        font: monospace_font.clone(),
+        color: black(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+      };
+
+      let shaped_line =
+        window
+          .text_system()
+          .shape_line(line.clone().into(), font_size, &[text_run], None);
+      self.line_layouts.push(shaped_line);
+    }
 
     div()
       .id("editor-view")
@@ -818,7 +830,7 @@ impl Render for DiffEditorView {
               .bg(opaque_grey(0.9, 1.0))
               .flex_col()
               .items_center()
-              .children(lines.iter().enumerate().map(|(i, _)| {
+              .children((0..lines.len()).map(|i| {
                 div()
                   .text_align(TextAlign::Right)
                   .line_height(px(config.line_height()))
