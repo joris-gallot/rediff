@@ -28,6 +28,10 @@ impl EditorConfig {
   pub fn cursor_height(&self) -> f32 {
     self.line_height() - 2.0
   }
+
+  pub fn cursor_width(&self) -> f32 {
+    2.0
+  }
 }
 
 pub struct DiffEditorView {
@@ -54,19 +58,6 @@ impl DiffEditorView {
       selection_start: None,
       selection_end: None,
     }
-  }
-
-  /// Helper function to split a string at a character index (not byte index)
-  fn split_at_char(s: &str, char_idx: usize) -> (String, String) {
-    // Find the byte index corresponding to the character index
-    let byte_idx = s
-      .char_indices()
-      .nth(char_idx)
-      .map(|(idx, _)| idx)
-      .unwrap_or(s.len());
-
-    let (before, after) = s.split_at(byte_idx);
-    (before.to_string(), after.to_string())
   }
 
   /// Helper function to get substring from char_start to char_end (character indices)
@@ -555,6 +546,19 @@ impl DiffEditorView {
     cx.notify();
   }
 
+  /// Calculate the X position (in pixels) for the cursor based on column position
+  /// Create a cursor div with consistent styling
+  fn create_cursor(&self, is_in_selection: bool) -> Div {
+    let config = &self.config;
+    div()
+      .absolute()
+      .top(px(0.0))
+      .right(px(0.0))
+      .w(px(config.cursor_width()))
+      .h(px(config.cursor_height()))
+      .bg(if is_in_selection { white() } else { black() })
+  }
+
   fn render_editor(&mut self, text: String, _cx: &mut Context<Self>) -> Div {
     let cursor_index = self.editor.cursor.index;
     let (cursor_line, cursor_col) = Self::get_cursor_position(&text, cursor_index);
@@ -587,17 +591,23 @@ impl DiffEditorView {
             if i == cursor_line {
               let line_char_count = line.chars().count();
               let cursor_col_clamped = cursor_col.min(line_char_count);
-              let (before, after) = Self::split_at_char(&line, cursor_col_clamped);
+              let before_cursor = Self::substring_chars(&line, 0, cursor_col_clamped);
+              let after_cursor = Self::substring_chars(&line, cursor_col_clamped, line_char_count);
 
               div()
                 .flex()
                 .flex_row()
                 .line_height(px(config.line_height()))
-                .child(before)
-                .child(div().w(px(2.0)).h(px(config.cursor_height())).bg(black()))
-                .child(after)
+                .child(
+                  div()
+                    .relative()
+                    .child(before_cursor)
+                    .child(self.create_cursor(false)),
+                )
+                .child(after_cursor)
             } else {
               div()
+                .relative()
                 .line_height(px(config.line_height()))
                 .child(line.to_string())
             }
@@ -607,75 +617,161 @@ impl DiffEditorView {
             let sel_start_in_line = sel.start.saturating_sub(line_start).min(line_char_count);
             let sel_end_in_line = sel.end.saturating_sub(line_start).min(line_char_count);
 
-            let before_sel = Self::substring_chars(&line, 0, sel_start_in_line);
-            let selected = Self::substring_chars(&line, sel_start_in_line, sel_end_in_line);
-            let after_sel = Self::substring_chars(&line, sel_end_in_line, line_char_count);
-
-            let mut row = div()
-              .flex()
-              .flex_row()
-              .line_height(px(config.line_height()));
-
-            if !before_sel.is_empty() {
-              row = row.child(before_sel);
-            }
-
-            // Always render selection background, even for empty lines
-            if !selected.is_empty() {
-              row = row.child(div().bg(rgb(0x0078D4)).text_color(white()).child(selected));
-            } else if sel_start_in_line < sel_end_in_line
-              || (line.is_empty() && sel_start_in_line == 0)
-            {
-              // Empty line or empty selection - render space with background to maintain line height
-              row = row.child(div().bg(rgb(0x0078D4)).text_color(white()).child(" "));
-            }
-
             if i == cursor_line {
-              let cursor_pos_in_line = cursor_col.min(line.len());
-              if cursor_pos_in_line >= sel_start_in_line && cursor_pos_in_line <= sel_end_in_line {
-                // Cursor is in selection
-                row = row.child(div().w(px(2.0)).h(px(config.cursor_height())).bg(white()));
-              } else if cursor_pos_in_line > sel_end_in_line {
+              // Line has both selection and cursor - build with cursor positioning
+              let cursor_col_clamped = cursor_col.min(line_char_count);
+
+              let before_sel = Self::substring_chars(&line, 0, sel_start_in_line);
+              let selected = Self::substring_chars(&line, sel_start_in_line, sel_end_in_line);
+              let after_sel = Self::substring_chars(&line, sel_end_in_line, line_char_count);
+
+              let mut new_row = div()
+                .flex()
+                .flex_row()
+                .line_height(px(config.line_height()));
+
+              // Render text before cursor with selection applied
+              if cursor_col_clamped <= sel_start_in_line {
+                // Cursor is before selection
+                let before_cursor = Self::substring_chars(&line, 0, cursor_col_clamped);
+                let cursor_to_sel =
+                  Self::substring_chars(&line, cursor_col_clamped, sel_start_in_line);
+
+                let cursor_container = div()
+                  .relative()
+                  .child(before_cursor)
+                  .child(self.create_cursor(false));
+                new_row = new_row.child(cursor_container);
+
+                if !cursor_to_sel.is_empty() {
+                  new_row = new_row.child(cursor_to_sel);
+                }
+
+                if !selected.is_empty() {
+                  new_row =
+                    new_row.child(div().bg(rgb(0x0078D4)).text_color(white()).child(selected));
+                } else if sel_start_in_line < sel_end_in_line {
+                  new_row = new_row.child(div().bg(rgb(0x0078D4)).text_color(white()).child(" "));
+                }
+
+                if !after_sel.is_empty() {
+                  new_row = new_row.child(after_sel);
+                }
+              } else if cursor_col_clamped >= sel_end_in_line {
                 // Cursor is after selection
-                let after_sel_char_count = after_sel.chars().count();
-                let cursor_offset = cursor_pos_in_line
-                  .saturating_sub(sel_end_in_line)
-                  .min(after_sel_char_count);
-                let (before_cursor, after_cursor) = Self::split_at_char(&after_sel, cursor_offset);
+                if !before_sel.is_empty() {
+                  new_row = new_row.child(before_sel);
+                }
 
-                if !before_cursor.is_empty() {
-                  row = row.child(before_cursor);
+                if !selected.is_empty() {
+                  new_row =
+                    new_row.child(div().bg(rgb(0x0078D4)).text_color(white()).child(selected));
+                } else if sel_start_in_line < sel_end_in_line {
+                  new_row = new_row.child(div().bg(rgb(0x0078D4)).text_color(white()).child(" "));
                 }
-                row = row.child(div().w(px(2.0)).h(px(config.cursor_height())).bg(black()));
-                if !after_cursor.is_empty() {
-                  row = row.child(after_cursor);
+
+                let cursor_before =
+                  Self::substring_chars(&line, sel_end_in_line, cursor_col_clamped);
+                let cursor_after =
+                  Self::substring_chars(&line, cursor_col_clamped, line_char_count);
+
+                let cursor_container = div()
+                  .relative()
+                  .child(cursor_before)
+                  .child(self.create_cursor(false));
+                new_row = new_row.child(cursor_container);
+
+                if !cursor_after.is_empty() {
+                  new_row = new_row.child(cursor_after);
                 }
-                return row;
+              } else {
+                // Cursor is inside selection
+                if !before_sel.is_empty() {
+                  new_row = new_row.child(before_sel);
+                }
+
+                let sel_before_cursor =
+                  Self::substring_chars(&line, sel_start_in_line, cursor_col_clamped);
+                let sel_after_cursor =
+                  Self::substring_chars(&line, cursor_col_clamped, sel_end_in_line);
+
+                let cursor_container = div()
+                  .relative()
+                  .bg(rgb(0x0078D4))
+                  .text_color(white())
+                  .child(sel_before_cursor)
+                  .child(self.create_cursor(true));
+
+                new_row = new_row.child(cursor_container);
+
+                if !sel_after_cursor.is_empty() {
+                  new_row = new_row.child(
+                    div()
+                      .bg(rgb(0x0078D4))
+                      .text_color(white())
+                      .child(sel_after_cursor),
+                  );
+                }
+                if !after_sel.is_empty() {
+                  new_row = new_row.child(after_sel);
+                }
               }
-            }
 
-            if !after_sel.is_empty() {
-              row = row.child(after_sel);
-            }
+              new_row
+            } else {
+              // Line has selection but no cursor
+              let before_sel = Self::substring_chars(&line, 0, sel_start_in_line);
+              let selected = Self::substring_chars(&line, sel_start_in_line, sel_end_in_line);
+              let after_sel = Self::substring_chars(&line, sel_end_in_line, line_char_count);
 
-            row
+              let mut row = div()
+                .flex()
+                .flex_row()
+                .line_height(px(config.line_height()));
+
+              if !before_sel.is_empty() {
+                row = row.child(before_sel);
+              }
+
+              // Always render selection background, even for empty lines
+              if !selected.is_empty() {
+                row = row.child(div().bg(rgb(0x0078D4)).text_color(white()).child(selected));
+              } else if sel_start_in_line < sel_end_in_line
+                || (line.is_empty() && sel_start_in_line == 0)
+              {
+                // Empty line or empty selection - render space with background to maintain line height
+                row = row.child(div().bg(rgb(0x0078D4)).text_color(white()).child(" "));
+              }
+
+              if !after_sel.is_empty() {
+                row = row.child(after_sel);
+              }
+
+              row
+            }
           }
         } else {
           // No selection at all
           if i == cursor_line {
             let line_char_count = line.chars().count();
             let cursor_col_clamped = cursor_col.min(line_char_count);
-            let (before, after) = Self::split_at_char(&line, cursor_col_clamped);
+            let before_cursor = Self::substring_chars(&line, 0, cursor_col_clamped);
+            let after_cursor = Self::substring_chars(&line, cursor_col_clamped, line_char_count);
 
             div()
               .flex()
               .flex_row()
               .line_height(px(config.line_height()))
-              .child(before)
-              .child(div().w(px(2.0)).h(px(config.cursor_height())).bg(black()))
-              .child(after)
+              .child(
+                div()
+                  .relative()
+                  .child(before_cursor)
+                  .child(self.create_cursor(false)),
+              )
+              .child(after_cursor)
           } else {
             div()
+              .relative()
               .line_height(px(config.line_height()))
               .child(line.to_string())
           }
@@ -810,8 +906,14 @@ mod tests {
 
   #[test]
   fn test_editor_config_cursor_height() {
-    let config = EditorConfig { font_size: 16.0 };
-    assert_eq!(config.cursor_height(), 22.0);
+    let config = EditorConfig::default();
+    assert_eq!(config.cursor_height(), 22.0); // 24.0 * 1.5 - 2.0 = 22.0
+  }
+
+  #[test]
+  fn test_editor_config_cursor_width() {
+    let config = EditorConfig::default();
+    assert_eq!(config.cursor_width(), 2.0);
   }
 
   #[test]
@@ -845,31 +947,6 @@ mod tests {
     let (line, col) = DiffEditorView::get_cursor_position(text, 13);
     assert_eq!(line, 0);
     assert_eq!(col, 13);
-  }
-
-  #[test]
-  fn test_split_at_char_with_emoji() {
-    let text = "hello 🌍 world";
-
-    // Split before emoji (char index 6)
-    let (before, after) = DiffEditorView::split_at_char(text, 6);
-    assert_eq!(before, "hello ");
-    assert_eq!(after, "🌍 world");
-
-    // Split after emoji (char index 7)
-    let (before, after) = DiffEditorView::split_at_char(text, 7);
-    assert_eq!(before, "hello 🌍");
-    assert_eq!(after, " world");
-
-    // Split at start
-    let (before, after) = DiffEditorView::split_at_char(text, 0);
-    assert_eq!(before, "");
-    assert_eq!(after, "hello 🌍 world");
-
-    // Split at end
-    let (before, after) = DiffEditorView::split_at_char(text, 13);
-    assert_eq!(before, "hello 🌍 world");
-    assert_eq!(after, "");
   }
 
   #[test]
