@@ -36,6 +36,7 @@ pub struct DiffEditorView {
   config: EditorConfig,
   scroll_handle: UniformListScrollHandle,
   is_selecting: bool,
+  selection_anchor: Option<usize>,
   line_cache: Arc<Mutex<LineCache>>,
 }
 
@@ -49,6 +50,7 @@ impl DiffEditorView {
       config: config.unwrap_or_default(),
       scroll_handle: UniformListScrollHandle::new(),
       is_selecting: false,
+      selection_anchor: None,
       line_cache: Arc::new(Mutex::new(LineCache::new())),
     }
   }
@@ -119,6 +121,7 @@ impl DiffEditorView {
         self.editor.cursor.index = index;
         self.editor.clear_selection();
         self.is_selecting = true;
+        self.selection_anchor = Some(index);
       }
       2 => {
         self.editor.select_word_at(index);
@@ -137,8 +140,8 @@ impl DiffEditorView {
     if self.is_selecting || event.pressed_button == Some(MouseButton::Left) {
       let index = self.calculate_index_from_position(event.position, window);
 
-      if let Some(range) = self.editor.selection_range() {
-        self.editor.select_range(range.start, index);
+      if let Some(anchor) = self.selection_anchor {
+        self.editor.select_range(anchor, index);
       } else {
         self.editor.select_range(self.editor.cursor.index, index);
       }
@@ -149,6 +152,7 @@ impl DiffEditorView {
 
   fn on_mouse_up(&mut self, _event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
     self.is_selecting = false;
+    self.selection_anchor = None;
     cx.notify();
   }
 
@@ -159,6 +163,7 @@ impl DiffEditorView {
     _cx: &mut Context<Self>,
   ) {
     self.is_selecting = false;
+    self.selection_anchor = None;
   }
 
   fn render_line_numbers(

@@ -119,10 +119,6 @@ impl LineElement {
 
   /// Calculates cursor bounds if it is on this line
   fn calculate_cursor_bounds(&self, shaped_line: &ShapedLine) -> Option<CursorBounds> {
-    if self.editor_state.selection_range.is_some() {
-      return None;
-    }
-
     let (cursor_row, cursor_col) = self.buffer.char_to_line_col(self.editor_state.cursor_index);
 
     if cursor_row != self.line_idx {
@@ -301,21 +297,23 @@ mod tests {
   }
 
   #[test]
-  fn test_editor_state_no_selection_has_cursor() {
+  fn test_editor_state_no_selection_shows_cursor() {
     let editor_state = EditorState {
       cursor_index: 0,
       selection_range: None,
     };
     assert!(editor_state.selection_range.is_none());
+    assert_eq!(editor_state.cursor_index, 0);
   }
 
   #[test]
-  fn test_editor_state_with_selection_no_cursor() {
+  fn test_editor_state_with_selection_shows_cursor() {
     let editor_state = EditorState {
       cursor_index: 10,
       selection_range: Some(5..10),
     };
     assert!(editor_state.selection_range.is_some());
+    assert_eq!(editor_state.cursor_index, 10);
   }
 
   #[test]
