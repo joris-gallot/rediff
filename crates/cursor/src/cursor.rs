@@ -22,12 +22,18 @@
 // - Option+Arrow word navigation
 // - Option+Backspace word deletion
 
-use crate::goal::CursorGoal;
 use text::TextBuffer;
+
+#[derive(Default, Copy, Clone, Debug, PartialEq)]
+pub enum CursorGoal {
+  #[default]
+  None,
+  /// The column position we want to maintain when moving up/down
+  Column(usize),
+}
 
 /// Tracks the desired horizontal position during vertical movement
 #[derive(Default, Copy, Clone, Debug, PartialEq)]
-
 pub struct Cursor {
   pub index: usize,
   pub goal: CursorGoal,
