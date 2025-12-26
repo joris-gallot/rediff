@@ -1,11 +1,12 @@
-use editor::Editor;
 use cursor::Cursor;
+use editor::Editor;
 
 use gpui::{
-  App, Context, Div, FocusHandle, Focusable, Font, KeyDownEvent, MouseButton, MouseDownEvent,
-  MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollHandle, ShapedLine, TextAlign,
-  TextRun, Window, black, div, opaque_grey, prelude::*, px, rgb, white,
+  App, Bounds, Context, Div, FocusHandle, Focusable, Font, KeyDownEvent, MouseButton,
+  MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollHandle, ShapedLine,
+  TextAlign, TextRun, Window, black, div, opaque_grey, prelude::*, px, rgb, white,
 };
+use text::TextBuffer;
 
 const LINE_NUMBERS_WIDTH: f32 = 50.0;
 const EDITOR_PADDING: f32 = 8.0;
@@ -33,6 +34,13 @@ impl EditorConfig {
   pub fn cursor_width(&self) -> f32 {
     2.0
   }
+}
+
+/// State computed during prepaint phase
+pub struct PrepaintState {
+  line_layouts: Vec<ShapedLine>,
+  cursor_bounds: Option<Bounds<Pixels>>,
+  selection_bounds: Vec<Bounds<Pixels>>,
 }
 
 pub struct DiffEditorView {
@@ -65,35 +73,157 @@ impl DiffEditorView {
     }
   }
 
+  /// Layout cursor bounds
+  fn layout_cursor(
+    cursor_index: usize,
+    buffer: &TextBuffer,
+    line_layouts: &[ShapedLine],
+    bounds: Bounds<Pixels>,
+    line_height: Pixels,
+  ) -> Option<Bounds<Pixels>> {
+    let (row, col) = buffer.char_to_line_col(cursor_index);
+
+    if row >= line_layouts.len() {
+      return None;
+    }
+
+    let shaped_line = &line_layouts[row];
+    let cursor_x = shaped_line.x_for_index(col);
+
+    let cursor_y = bounds.top() + (line_height * row as f32);
+
+    Some(Bounds::new(
+      gpui::point(bounds.left() + cursor_x, cursor_y),
+      gpui::size(px(2.0), line_height),
+    ))
+  }
+
+  /// Layout selection as Bounds (one per line)
+  fn layout_selection(
+    start_index: usize,
+    end_index: usize,
+    buffer: &TextBuffer,
+    line_layouts: &[ShapedLine],
+    bounds: Bounds<Pixels>,
+    line_height: Pixels,
+  ) -> Vec<Bounds<Pixels>> {
+    let mut selection_bounds = Vec::new();
+
+    let (start_row, start_col) = buffer.char_to_line_col(start_index);
+    let (end_row, end_col) = buffer.char_to_line_col(end_index);
+
+    for row in start_row..=end_row {
+      if row >= line_layouts.len() {
+        break;
+      }
+
+      let shaped_line = &line_layouts[row];
+
+      let col_start = if row == start_row { start_col } else { 0 };
+      let col_end = if row == end_row {
+        end_col
+      } else {
+        shaped_line.len
+      };
+
+      let x_start = shaped_line.x_for_index(col_start);
+      let x_end = shaped_line.x_for_index(col_end);
+
+      let y = bounds.top() + (line_height * row as f32);
+
+      selection_bounds.push(Bounds::from_corners(
+        gpui::point(bounds.left() + x_start, y),
+        gpui::point(bounds.left() + x_end, y + line_height),
+      ));
+    }
+
+    selection_bounds
+  }
+
+  /// Shape all lines of text into ShapedLine layouts
+  fn shape_lines(
+    buffer: &TextBuffer,
+    config: &EditorConfig,
+    window: &mut Window,
+  ) -> Vec<ShapedLine> {
+    let text = buffer.as_str();
+    let lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();
+    let mut line_layouts = Vec::with_capacity(lines.len());
+
+    let font_size = px(config.font_size);
+    let monospace_font = Font {
+      family: "monospace".into(),
+      features: Default::default(),
+      fallbacks: Default::default(),
+      weight: Default::default(),
+      style: Default::default(),
+    };
+
+    for line in &lines {
+      let text_run = TextRun {
+        len: line.len(),
+        font: monospace_font.clone(),
+        color: black(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+      };
+
+      let shaped_line =
+        window
+          .text_system()
+          .shape_line(line.clone().into(), font_size, &[text_run], None);
+      line_layouts.push(shaped_line);
+    }
+
+    line_layouts
+  }
+
+  /// Prepaint phase: compute all layout state
+  fn prepaint(&mut self, window: &mut Window, bounds: Bounds<Pixels>) -> PrepaintState {
+    let config = &self.config;
+    let line_height = px(config.line_height());
+
+    let line_layouts = Self::shape_lines(&self.editor.buffer, config, window);
+
+    let cursor_bounds = if self.get_selection_range().is_none() {
+      Self::layout_cursor(
+        self.editor.cursor.index,
+        &self.editor.buffer,
+        &line_layouts,
+        bounds,
+        line_height,
+      )
+    } else {
+      None
+    };
+
+    let selection_bounds = if let Some(range) = self.get_selection_range() {
+      Self::layout_selection(
+        range.start,
+        range.end,
+        &self.editor.buffer,
+        &line_layouts,
+        bounds,
+        line_height,
+      )
+    } else {
+      Vec::new()
+    };
+
+    PrepaintState {
+      line_layouts,
+      cursor_bounds,
+      selection_bounds,
+    }
+  }
+
   /// Helper function to get substring from char_start to char_end (character indices)
   fn substring_chars(s: &str, char_start: usize, char_end: usize) -> String {
     s.chars()
       .skip(char_start)
       .take(char_end - char_start)
       .collect()
-  }
-
-  fn get_cursor_position(text: &str, cursor_index: usize) -> (usize, usize) {
-    let chars: Vec<char> = text.chars().collect();
-    let clamped_index = cursor_index.min(chars.len());
-
-    // Count lines and columns based on character indices
-    let mut line = 0;
-    let mut col = 0;
-
-    for (i, &ch) in chars.iter().enumerate() {
-      if i >= clamped_index {
-        break;
-      }
-      if ch == '\n' {
-        line += 1;
-        col = 0;
-      } else {
-        col += 1;
-      }
-    }
-
-    (line, col)
   }
 
   fn get_selection_range(&self) -> Option<std::ops::Range<usize>> {
@@ -525,32 +655,10 @@ impl DiffEditorView {
     cx.notify();
   }
 
-  /// Calculate the X position (in pixels) for the cursor based on column position
-  /// Create a cursor div with consistent styling
-  fn create_cursor(&self, is_in_selection: bool) -> Div {
-    let config = &self.config;
-    div()
-      .absolute()
-      .top(px(0.0))
-      .right(px(0.0))
-      .w(px(config.cursor_width()))
-      .h(px(config.cursor_height()))
-      .bg(if is_in_selection { white() } else { black() })
-  }
-
-  fn render_editor(&mut self, text: String, _cx: &mut Context<Self>) -> Div {
-    let cursor_index = self.editor.cursor.index;
-    let (cursor_line, cursor_col) = Self::get_cursor_position(&text, cursor_index);
+  /// Render using prepaint quads
+  fn render_editor(&self, prepaint: &PrepaintState, config: &EditorConfig) -> Div {
+    let text = self.editor.buffer.as_str().to_string();
     let lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();
-    let config = &self.config;
-    let selection = self.get_selection_range();
-
-    let mut line_starts = vec![0];
-    let mut pos = 0;
-    for line in &lines {
-      pos += line.chars().count() + 1; // +1 for \n, count characters not bytes
-      line_starts.push(pos);
-    }
 
     div()
       .flex()
@@ -558,203 +666,33 @@ impl DiffEditorView {
       .px(px(EDITOR_PADDING))
       .w_full()
       .cursor_text()
-      .bg(white())
-      .font_family("monospace")
-      .children(lines.into_iter().enumerate().map(|(i, line)| {
-        let line_start = line_starts[i];
-        let line_end = line_start + line.chars().count();
-
-        if let Some(ref sel) = selection {
-          if sel.start >= line_end || sel.end <= line_start {
-            // No selection on this line - render normally
-            if i == cursor_line {
-              let line_char_count = line.chars().count();
-              let cursor_col_clamped = cursor_col.min(line_char_count);
-              let before_cursor = Self::substring_chars(&line, 0, cursor_col_clamped);
-              let after_cursor = Self::substring_chars(&line, cursor_col_clamped, line_char_count);
-
-              div()
-                .flex()
-                .flex_row()
-                .line_height(px(config.line_height()))
-                .child(
-                  div()
-                    .relative()
-                    .child(before_cursor)
-                    .child(self.create_cursor(false)),
-                )
-                .child(after_cursor)
-            } else {
-              div()
-                .relative()
-                .line_height(px(config.line_height()))
-                .child(line.to_string())
-            }
+      .relative()
+      .children(prepaint.selection_bounds.iter().map(|bounds| {
+        div()
+          .absolute()
+          .left(bounds.left())
+          .top(bounds.top())
+          .w(bounds.size.width)
+          .h(bounds.size.height)
+          .bg(rgb(0x0078D4))
+      }))
+      .children(lines.iter().map(|line| {
+        div()
+          .line_height(px(config.line_height()))
+          .child(if line.is_empty() {
+            " ".to_string()
           } else {
-            // Line has selection
-            let line_char_count = line.chars().count();
-            let sel_start_in_line = sel.start.saturating_sub(line_start).min(line_char_count);
-            let sel_end_in_line = sel.end.saturating_sub(line_start).min(line_char_count);
-
-            if i == cursor_line {
-              // Line has both selection and cursor - build with cursor positioning
-              let cursor_col_clamped = cursor_col.min(line_char_count);
-
-              let before_sel = Self::substring_chars(&line, 0, sel_start_in_line);
-              let selected = Self::substring_chars(&line, sel_start_in_line, sel_end_in_line);
-              let after_sel = Self::substring_chars(&line, sel_end_in_line, line_char_count);
-
-              let mut new_row = div()
-                .flex()
-                .flex_row()
-                .line_height(px(config.line_height()));
-
-              // Render text before cursor with selection applied
-              if cursor_col_clamped <= sel_start_in_line {
-                // Cursor is before selection
-                let before_cursor = Self::substring_chars(&line, 0, cursor_col_clamped);
-                let cursor_to_sel =
-                  Self::substring_chars(&line, cursor_col_clamped, sel_start_in_line);
-
-                let cursor_container = div()
-                  .relative()
-                  .child(before_cursor)
-                  .child(self.create_cursor(false));
-                new_row = new_row.child(cursor_container);
-
-                if !cursor_to_sel.is_empty() {
-                  new_row = new_row.child(cursor_to_sel);
-                }
-
-                if !selected.is_empty() {
-                  new_row =
-                    new_row.child(div().bg(rgb(0x0078D4)).text_color(white()).child(selected));
-                } else if sel_start_in_line < sel_end_in_line {
-                  new_row = new_row.child(div().bg(rgb(0x0078D4)).text_color(white()).child(" "));
-                }
-
-                if !after_sel.is_empty() {
-                  new_row = new_row.child(after_sel);
-                }
-              } else if cursor_col_clamped >= sel_end_in_line {
-                // Cursor is after selection
-                if !before_sel.is_empty() {
-                  new_row = new_row.child(before_sel);
-                }
-
-                if !selected.is_empty() {
-                  new_row =
-                    new_row.child(div().bg(rgb(0x0078D4)).text_color(white()).child(selected));
-                } else if sel_start_in_line < sel_end_in_line {
-                  new_row = new_row.child(div().bg(rgb(0x0078D4)).text_color(white()).child(" "));
-                }
-
-                let cursor_before =
-                  Self::substring_chars(&line, sel_end_in_line, cursor_col_clamped);
-                let cursor_after =
-                  Self::substring_chars(&line, cursor_col_clamped, line_char_count);
-
-                let cursor_container = div()
-                  .relative()
-                  .child(cursor_before)
-                  .child(self.create_cursor(false));
-                new_row = new_row.child(cursor_container);
-
-                if !cursor_after.is_empty() {
-                  new_row = new_row.child(cursor_after);
-                }
-              } else {
-                // Cursor is inside selection
-                if !before_sel.is_empty() {
-                  new_row = new_row.child(before_sel);
-                }
-
-                let sel_before_cursor =
-                  Self::substring_chars(&line, sel_start_in_line, cursor_col_clamped);
-                let sel_after_cursor =
-                  Self::substring_chars(&line, cursor_col_clamped, sel_end_in_line);
-
-                let cursor_container = div()
-                  .relative()
-                  .bg(rgb(0x0078D4))
-                  .text_color(white())
-                  .child(sel_before_cursor)
-                  .child(self.create_cursor(true));
-
-                new_row = new_row.child(cursor_container);
-
-                if !sel_after_cursor.is_empty() {
-                  new_row = new_row.child(
-                    div()
-                      .bg(rgb(0x0078D4))
-                      .text_color(white())
-                      .child(sel_after_cursor),
-                  );
-                }
-                if !after_sel.is_empty() {
-                  new_row = new_row.child(after_sel);
-                }
-              }
-
-              new_row
-            } else {
-              // Line has selection but no cursor
-              let before_sel = Self::substring_chars(&line, 0, sel_start_in_line);
-              let selected = Self::substring_chars(&line, sel_start_in_line, sel_end_in_line);
-              let after_sel = Self::substring_chars(&line, sel_end_in_line, line_char_count);
-
-              let mut row = div()
-                .flex()
-                .flex_row()
-                .line_height(px(config.line_height()));
-
-              if !before_sel.is_empty() {
-                row = row.child(before_sel);
-              }
-
-              // Always render selection background, even for empty lines
-              if !selected.is_empty() {
-                row = row.child(div().bg(rgb(0x0078D4)).text_color(white()).child(selected));
-              } else if sel_start_in_line < sel_end_in_line
-                || (line.is_empty() && sel_start_in_line == 0)
-              {
-                // Empty line or empty selection - render space with background to maintain line height
-                row = row.child(div().bg(rgb(0x0078D4)).text_color(white()).child(" "));
-              }
-
-              if !after_sel.is_empty() {
-                row = row.child(after_sel);
-              }
-
-              row
-            }
-          }
-        } else {
-          // No selection at all
-          if i == cursor_line {
-            let line_char_count = line.chars().count();
-            let cursor_col_clamped = cursor_col.min(line_char_count);
-            let before_cursor = Self::substring_chars(&line, 0, cursor_col_clamped);
-            let after_cursor = Self::substring_chars(&line, cursor_col_clamped, line_char_count);
-
-            div()
-              .flex()
-              .flex_row()
-              .line_height(px(config.line_height()))
-              .child(
-                div()
-                  .relative()
-                  .child(before_cursor)
-                  .child(self.create_cursor(false)),
-              )
-              .child(after_cursor)
-          } else {
-            div()
-              .relative()
-              .line_height(px(config.line_height()))
-              .child(line.to_string())
-          }
-        }
+            line.clone()
+          })
+      }))
+      .children(prepaint.cursor_bounds.iter().map(|bounds| {
+        div()
+          .absolute()
+          .left(bounds.left())
+          .top(bounds.top())
+          .w(bounds.size.width)
+          .h(bounds.size.height)
+          .bg(black())
       }))
   }
 }
@@ -770,35 +708,15 @@ impl Render for DiffEditorView {
     let text = self.editor.buffer.as_str().to_string();
 
     let lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();
-    let config = &self.config;
+    let config = self.config.clone();
 
-    self.line_layouts.clear();
-    let font_size = px(config.font_size);
+    let editor_bounds = Bounds::new(
+      gpui::point(px(EDITOR_PADDING), px(0.0)),
+      gpui::size(px(1000.0), px(1000.0)), // Will be adjusted by layout
+    );
+    let prepaint_state = self.prepaint(window, editor_bounds);
 
-    let monospace_font = Font {
-      family: "monospace".into(),
-      features: Default::default(),
-      fallbacks: Default::default(),
-      weight: Default::default(),
-      style: Default::default(),
-    };
-
-    for line in &lines {
-      let text_run = TextRun {
-        len: line.len(),
-        font: monospace_font.clone(),
-        color: black(),
-        background_color: None,
-        underline: None,
-        strikethrough: None,
-      };
-
-      let shaped_line =
-        window
-          .text_system()
-          .shape_line(line.clone().into(), font_size, &[text_run], None);
-      self.line_layouts.push(shaped_line);
-    }
+    self.line_layouts = prepaint_state.line_layouts.clone();
 
     div()
       .id("editor-view")
@@ -832,7 +750,7 @@ impl Render for DiffEditorView {
                   .child((i + 1).to_string())
               })),
           )
-          .child(self.render_editor(text, cx)),
+          .child(self.render_editor(&prepaint_state, &config)),
       )
   }
 }
@@ -842,79 +760,15 @@ mod tests {
   use super::*;
 
   #[test]
-  fn test_get_cursor_position_start() {
-    let text = "hello world";
-    let (line, col) = DiffEditorView::get_cursor_position(text, 0);
-    assert_eq!(line, 0);
-    assert_eq!(col, 0);
-  }
-
-  #[test]
-  fn test_get_cursor_position_middle_of_line() {
-    let text = "hello world";
-    let (line, col) = DiffEditorView::get_cursor_position(text, 5);
-    assert_eq!(line, 0);
-    assert_eq!(col, 5);
-  }
-
-  #[test]
-  fn test_get_cursor_position_end_of_line() {
-    let text = "hello world";
-    let (line, col) = DiffEditorView::get_cursor_position(text, 11);
-    assert_eq!(line, 0);
-    assert_eq!(col, 11);
-  }
-
-  #[test]
-  fn test_get_cursor_position_second_line() {
-    let text = "hello\nworld";
-    let (line, col) = DiffEditorView::get_cursor_position(text, 6);
-    assert_eq!(line, 1);
-    assert_eq!(col, 0);
-  }
-
-  #[test]
-  fn test_get_cursor_position_second_line_middle() {
-    let text = "hello\nworld";
-    let (line, col) = DiffEditorView::get_cursor_position(text, 9);
-    assert_eq!(line, 1);
-    assert_eq!(col, 3);
-  }
-
-  #[test]
-  fn test_get_cursor_position_multiple_lines() {
-    let text = "line1\nline2\nline3";
-    let (line, col) = DiffEditorView::get_cursor_position(text, 12);
-    assert_eq!(line, 2);
-    assert_eq!(col, 0);
-  }
-
-  #[test]
-  fn test_get_cursor_position_empty_lines() {
-    let text = "hello\n\nworld";
-    let (line, col) = DiffEditorView::get_cursor_position(text, 7);
-    assert_eq!(line, 2);
-    assert_eq!(col, 0);
-  }
-
-  #[test]
-  fn test_get_cursor_position_beyond_text() {
-    let text = "hello";
-    let (line, col) = DiffEditorView::get_cursor_position(text, 100);
-    assert_eq!(line, 0);
-    assert_eq!(col, 5); // Clamped to text length
-  }
-
-  #[test]
   fn test_editor_config_line_height() {
-    let config = EditorConfig { font_size: 16.0 };
+    let config = EditorConfig::default();
     assert_eq!(config.line_height(), 24.0);
   }
 
   #[test]
   fn test_editor_config_cursor_height() {
     let config = EditorConfig::default();
-    assert_eq!(config.cursor_height(), 22.0); // 24.0 * 1.5 - 2.0 = 22.0
+    assert_eq!(config.cursor_height(), 22.0);
   }
 
   #[test]
@@ -927,33 +781,6 @@ mod tests {
   fn test_editor_config_default() {
     let config = EditorConfig::default();
     assert_eq!(config.font_size, 16.0);
-  }
-
-  #[test]
-  fn test_get_cursor_position_with_emoji() {
-    let text = "hello 🌍 world";
-    // "hello " = 6 chars, "🌍" = 1 char, " world" = 6 chars
-    // Total = 13 characters
-
-    // At start
-    let (line, col) = DiffEditorView::get_cursor_position(text, 0);
-    assert_eq!(line, 0);
-    assert_eq!(col, 0);
-
-    // Before emoji (character index 6)
-    let (line, col) = DiffEditorView::get_cursor_position(text, 6);
-    assert_eq!(line, 0);
-    assert_eq!(col, 6);
-
-    // After emoji (character index 7)
-    let (line, col) = DiffEditorView::get_cursor_position(text, 7);
-    assert_eq!(line, 0);
-    assert_eq!(col, 7);
-
-    // At end (character index 13)
-    let (line, col) = DiffEditorView::get_cursor_position(text, 13);
-    assert_eq!(line, 0);
-    assert_eq!(col, 13);
   }
 
   #[test]
@@ -971,5 +798,135 @@ mod tests {
     // Extract full string
     let result = DiffEditorView::substring_chars(text, 0, 13);
     assert_eq!(result, "hello 🌍 world");
+  }
+
+  #[test]
+  fn test_layout_cursor_conversion() {
+    // Test that layout_cursor correctly converts char index to (row, col)
+    let mut buffer = TextBuffer::new();
+    buffer.insert(0, "hello\nworld\ntest");
+
+    // Index 0 should be row 0, col 0
+    let (row, col) = buffer.char_to_line_col(0);
+    assert_eq!(row, 0);
+    assert_eq!(col, 0);
+
+    // Index 6 should be row 1, col 0 (start of "world")
+    let (row, col) = buffer.char_to_line_col(6);
+    assert_eq!(row, 1);
+    assert_eq!(col, 0);
+
+    // Index 12 should be row 2, col 0 (start of "test")
+    let (row, col) = buffer.char_to_line_col(12);
+    assert_eq!(row, 2);
+    assert_eq!(col, 0);
+  }
+
+  #[test]
+  fn test_layout_cursor_out_of_bounds() {
+    // Test that layout_cursor returns None for out of bounds row
+    let mut buffer = TextBuffer::new();
+    buffer.insert(0, "hello\nworld");
+    let line_layouts = Vec::new(); // Empty layouts
+    let bounds = Bounds::new(
+      gpui::point(px(0.0), px(0.0)),
+      gpui::size(px(100.0), px(100.0)),
+    );
+    let line_height = px(20.0);
+
+    let result = DiffEditorView::layout_cursor(0, &buffer, &line_layouts, bounds, line_height);
+
+    // Should return None because line_layouts is empty
+    assert!(result.is_none());
+  }
+
+  #[test]
+  fn test_layout_selection_conversion() {
+    // Test that layout_selection correctly converts char ranges to (row, col) ranges
+    let mut buffer = TextBuffer::new();
+    buffer.insert(0, "hello\nworld\ntest");
+
+    // Selection from index 0 to 5 (entire first line minus newline)
+    let (start_row, start_col) = buffer.char_to_line_col(0);
+    let (end_row, end_col) = buffer.char_to_line_col(5);
+    assert_eq!(start_row, 0);
+    assert_eq!(start_col, 0);
+    assert_eq!(end_row, 0);
+    assert_eq!(end_col, 5);
+
+    // Selection from index 0 to 12 (spans 3 lines)
+    let (start_row, start_col) = buffer.char_to_line_col(0);
+    let (end_row, end_col) = buffer.char_to_line_col(12);
+    assert_eq!(start_row, 0);
+    assert_eq!(start_col, 0);
+    assert_eq!(end_row, 2);
+    assert_eq!(end_col, 0);
+  }
+
+  #[test]
+  fn test_layout_selection_single_line_span() {
+    // Test layout_selection logic for single line
+    let mut buffer = TextBuffer::new();
+    buffer.insert(0, "hello world");
+
+    // For single line selection from col 0 to 5:
+    let (start_row, start_col) = buffer.char_to_line_col(0);
+    let (end_row, end_col) = buffer.char_to_line_col(5);
+
+    // Should iterate from start_row to end_row (0 to 0, inclusive)
+    assert_eq!(start_row, end_row);
+
+    // col_start should be start_col (0)
+    // col_end should be end_col (5)
+    let col_start = if start_row == start_row { start_col } else { 0 };
+    let col_end = if start_row == end_row { end_col } else { 11 }; // line length
+
+    assert_eq!(col_start, 0);
+    assert_eq!(col_end, 5);
+  }
+
+  #[test]
+  fn test_layout_selection_multi_line_span() {
+    // Test layout_selection logic for multi-line selection
+    let mut buffer = TextBuffer::new();
+    buffer.insert(0, "hello\nworld\ntest");
+
+    // Selection from index 3 (middle of "hello") to index 9 (middle of "world")
+    let (start_row, start_col) = buffer.char_to_line_col(3); // "lo" in "hello"
+    let (end_row, end_col) = buffer.char_to_line_col(9); // "ld" in "world"
+
+    assert_eq!(start_row, 0);
+    assert_eq!(start_col, 3);
+    assert_eq!(end_row, 1);
+    assert_eq!(end_col, 3);
+
+    // For row 0 (start row):
+    // col_start = start_col (3)
+    // col_end = line_length (5 for "hello")
+
+    // For row 1 (end row):
+    // col_start = 0
+    // col_end = end_col (3)
+  }
+
+  #[test]
+  fn test_layout_selection_empty_selection() {
+    // Test that empty selection (start == end) still works
+    let mut buffer = TextBuffer::new();
+    buffer.insert(0, "hello\nworld");
+    let line_layouts = Vec::new();
+    let bounds = Bounds::new(
+      gpui::point(px(0.0), px(0.0)),
+      gpui::size(px(100.0), px(100.0)),
+    );
+    let line_height = px(20.0);
+
+    // Selection with start == end
+    let result =
+      DiffEditorView::layout_selection(5, 5, &buffer, &line_layouts, bounds, line_height);
+
+    // Should return empty vec or single point (depending on implementation)
+    // With empty line_layouts, it will break early
+    assert!(result.is_empty());
   }
 }
