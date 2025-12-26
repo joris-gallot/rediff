@@ -1,0 +1,12 @@
+[package]
+name = "rediff"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "rediff"
+path = "src/main.rs"
+
+[dependencies]
+gpui = { workspace = true }
+ui = { workspace = true }

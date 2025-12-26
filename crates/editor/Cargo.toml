@@ -1,0 +1,8 @@
+[package]
+name = "editor"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+text = { workspace = true }
+cursor = { workspace = true }

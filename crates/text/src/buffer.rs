@@ -1,6 +1,6 @@
 use ropey::Rope;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TextBuffer {
   rope: Rope,
 }
@@ -25,6 +25,10 @@ impl TextBuffer {
 
   pub fn len(&self) -> usize {
     self.rope.len_chars()
+  }
+
+  pub fn is_empty(&self) -> bool {
+    self.rope.len_chars() == 0
   }
 
   pub fn line_count(&self) -> usize {

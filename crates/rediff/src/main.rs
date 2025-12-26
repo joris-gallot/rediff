@@ -1,6 +1,6 @@
-mod core;
-mod ui;
-use crate::ui::DiffEditorView;
+
+
+use ui::DiffEditorView;
 
 use gpui::{App, Application, Bounds, WindowBounds, WindowOptions, prelude::*, px, size};
 

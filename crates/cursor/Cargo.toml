@@ -1,0 +1,7 @@
+[package]
+name = "cursor"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+text = { workspace = true }

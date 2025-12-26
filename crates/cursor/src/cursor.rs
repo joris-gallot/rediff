@@ -1,36 +1,32 @@
-//! Cursor movement and word boundary detection
-//!
-//! This module provides cursor navigation functionality including:
-//! - Basic movement (left, right, up, down)
-//! - Line-based movement (start/end of line, start/end of buffer)
-//! - Word-based movement and boundary detection
-//!
-//! # Word Boundaries
-//!
-//! Word boundaries are defined consistently across the codebase using `is_word_char()`:
-//! - **Word characters**: alphanumeric (a-z, A-Z, 0-9) and underscore (_)
-//! - **Non-word characters**: everything else (punctuation, emoji, etc.)
-//! - **Whitespace**: spaces and tabs (treated as separate segments)
-//! - **Newlines**: always treated as their own segment
-//!
-//! Adjacent word characters are grouped together. Adjacent non-word characters (like
-//! punctuation or emojis) are grouped together, but **whitespace acts as a separator**.
-//! This means "🗿 🗿 🗿" is treated as 5 segments: emoji, space, emoji, space, emoji.
-//!
-//! The `find_word_boundaries()` function is the shared implementation used by:
-//! - Double-click word selection in the UI
-//! - Option+Arrow word navigation
-//! - Option+Backspace word deletion
+// Cursor movement and word boundary detection
+//
+// This module provides cursor navigation functionality including:
+// - Basic movement (left, right, up, down)
+// - Line-based movement (start/end of line, start/end of buffer)
+// - Word-based movement and boundary detection
+//
+// # Word Boundaries
+//
+// Word boundaries are defined consistently across the codebase using `is_word_char()`:
+// - **Word characters**: alphanumeric (a-z, A-Z, 0-9) and underscore (_)
+// - **Non-word characters**: everything else (punctuation, emoji, etc.)
+// - **Whitespace**: spaces and tabs (treated as separate segments)
+// - **Newlines**: always treated as their own segment
+//
+// Adjacent word characters are grouped together. Adjacent non-word characters (like
+// punctuation or emojis) are grouped together, but **whitespace acts as a separator**.
+// This means "🗿 🗿 🗿" is treated as 5 segments: emoji, space, emoji, space, emoji.
+//
+// The `find_word_boundaries()` function is the shared implementation used by:
+// - Double-click word selection in the UI
+// - Option+Arrow word navigation
+// - Option+Backspace word deletion
 
-use super::buffer::TextBuffer;
+use crate::goal::CursorGoal;
+use text::TextBuffer;
 
 /// Tracks the desired horizontal position during vertical movement
 #[derive(Default, Copy, Clone, Debug, PartialEq)]
-pub enum CursorGoal {
-  #[default]
-  None,
-  Column(usize),
-}
 
 pub struct Cursor {
   pub index: usize,

@@ -1,5 +1,7 @@
-use crate::core::{buffer::TextBuffer, cursor::Cursor};
+use cursor::Cursor;
+use text::TextBuffer;
 
+#[derive(Default)]
 pub struct Editor {
   pub buffer: TextBuffer,
   pub cursor: Cursor,

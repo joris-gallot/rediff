@@ -1,8 +1,23 @@
-[package]
-name = "diff-editor"
+[workspace]
+resolver = "3"
+members = [
+    "crates/text",
+    "crates/cursor",
+    "crates/editor",
+    "crates/ui",
+    "crates/rediff",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
+[workspace.dependencies]
 gpui = { version = "*" }
 ropey = "1.6"
+
+# Internal crates
+text = { path = "crates/text" }
+cursor = { path = "crates/cursor" }
+editor = { path = "crates/editor" }
+ui = { path = "crates/ui" }

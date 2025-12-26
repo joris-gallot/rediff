@@ -1,0 +1,10 @@
+[package]
+name = "ui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+gpui = { workspace = true }
+text = { workspace = true }
+cursor = { workspace = true }
+editor = { workspace = true }

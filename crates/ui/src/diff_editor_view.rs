@@ -1,4 +1,5 @@
-use crate::core::{Cursor, Editor};
+use editor::Editor;
+use cursor::Cursor;
 
 use gpui::{
   App, Context, Div, FocusHandle, Focusable, Font, KeyDownEvent, MouseButton, MouseDownEvent,
