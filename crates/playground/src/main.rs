@@ -11,7 +11,6 @@ fn main() {
     Workspace::register(cx);
 
     let project_path = PathBuf::from("/Users/joris/workspace/git-playground/src");
-
     let compare_file_path = PathBuf::from("/Users/joris/workspace/git-playground/src/AppOld.vue");
 
     let compare_content =

@@ -108,58 +108,12 @@ impl Workspace {
 
 impl Render for Workspace {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let path_without_file_name = Some(
-      self
-        .current_file_path
-        .parent()
-        .unwrap_or(&self.current_file_path)
-        .to_path_buf(),
-    );
-
-    let file_name = self
-      .current_file_path
-      .file_name()
-      .and_then(|f| f.to_str().map(|s| s.to_string()));
-
     div()
       .on_action(cx.listener(Self::quit))
       .flex()
       .size_full()
       .bg(white())
       .child(self.render_files_panel(cx))
-      .child(
-        div()
-          .flex()
-          .flex_col()
-          .size_full()
-          .child(
-            div()
-              .border_b_1()
-              .border_color(GRAY_COLOR)
-              .px(px(10.0))
-              .py(px(5.0))
-              .flex()
-              .items_center()
-              .when(path_without_file_name.is_some(), |d| {
-                d.children(path_without_file_name.as_ref().map(|p| {
-                  div()
-                    .text_color(rgb(0x666666))
-                    .child(format!("{}/", p.display()))
-                }))
-              })
-              .when_else(
-                file_name.is_some(),
-                |d| {
-                  d.child(
-                    div()
-                      .font_weight(FontWeight::SEMIBOLD)
-                      .child(file_name.unwrap()),
-                  )
-                },
-                |d| d.child("Untitled"),
-              ),
-          )
-          .child(self.editor.clone()),
-      )
+      .child(self.editor.clone())
   }
 }
