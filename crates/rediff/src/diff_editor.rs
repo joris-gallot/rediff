@@ -43,7 +43,6 @@ pub struct DiffEditor {
   line_cache: Arc<Mutex<LineCache>>,
   file_path: PathBuf,
   is_dirty: bool,
-  was_focused: bool,
   compare_content: String,
   differ: Differ,
 }
@@ -81,7 +80,6 @@ impl DiffEditor {
       line_cache: Arc::new(Mutex::new(LineCache::new())),
       file_path,
       is_dirty: false,
-      was_focused: false,
       compare_content,
       differ,
     }
@@ -566,10 +564,10 @@ impl Focusable for DiffEditor {
 impl Render for DiffEditor {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let is_focused = self.focus_handle.is_focused(window);
-    if is_focused && !self.was_focused && !self.is_dirty {
+
+    if is_focused && !self.is_dirty {
       self.reload_file(cx);
     }
-    self.was_focused = is_focused;
 
     let font_size = self.config.font_size;
     let focus_handle = self.focus_handle.clone();
