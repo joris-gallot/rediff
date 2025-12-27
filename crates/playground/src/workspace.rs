@@ -1,6 +1,8 @@
-use rediff::{DiffEditor, EditorConfig};
+use gpui::{
+  App, Entity, FontWeight, Hsla, KeyBinding, Window, actions, div, prelude::*, px, rgb, white,
+};
 
-use gpui::{App, Entity, FontWeight, KeyBinding, Window, actions, div, prelude::*, px, rgb, white};
+use rediff::{DiffEditor, EditorConfig};
 use std::path::PathBuf;
 
 actions!(playground, [Quit]);
@@ -10,7 +12,7 @@ pub struct Workspace {
   files: Vec<PathBuf>,
 }
 
-const GRAY_COLOR: gpui::Hsla = gpui::Hsla {
+const GRAY_COLOR: Hsla = Hsla {
   h: 0.0,
   s: 0.0,
   l: 0.9,
@@ -18,12 +20,7 @@ const GRAY_COLOR: gpui::Hsla = gpui::Hsla {
 };
 
 impl Workspace {
-  pub fn new(
-    path: PathBuf,
-    compare_content: String,
-    config: EditorConfig,
-    cx: &mut Context<Self>,
-  ) -> Self {
+  pub fn new(path: PathBuf, compare_content: String, cx: &mut Context<Self>) -> Self {
     let files: Vec<PathBuf> = std::fs::read_dir(&path)
       .ok()
       .map(|entries| {
@@ -41,8 +38,18 @@ impl Workspace {
       files[0].clone()
     };
 
-    let editor =
-      cx.new(|cx| DiffEditor::new(first_path.clone(), compare_content.clone(), config, cx));
+    let editor = cx.new(|cx| {
+      DiffEditor::new(
+        first_path.clone(),
+        compare_content.clone(),
+        EditorConfig {
+          ..Default::default()
+        },
+        cx,
+      )
+    });
+
+    editor.as_mut(cx).toggle_dark_mode();
 
     Self { editor, files }
   }

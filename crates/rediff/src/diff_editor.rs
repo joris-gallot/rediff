@@ -1,11 +1,11 @@
+use crate::config::{EditorConfig, EditorTheme};
 use crate::line_cache::LineCache;
 use crate::line_element::{DiffBackground, EditorState, LineConfig, LineElement};
 use editor::{DiffLine, DiffLineKind, Differ, Editor};
 use gpui::{
   App, ClipboardItem, Context, FocusHandle, Focusable, Font, Hsla, KeyDownEvent, MouseButton,
   MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, TextRun,
-  UniformListScrollHandle, Window, black, div, opaque_grey, prelude::*, px, rgba, uniform_list,
-  white,
+  UniformListScrollHandle, Window, black, div, prelude::*, px, uniform_list,
 };
 use std::ops::Range;
 use std::path::PathBuf;
@@ -15,96 +15,6 @@ use text::TextBuffer;
 const LINE_NUMBERS_WIDTH: f32 = 60.0;
 const DIFF_GUTTER_WIDTH: f32 = 8.0;
 const EDITOR_PADDING: f32 = 8.0;
-
-#[derive(Clone, Debug)]
-pub struct EditorThemeGitColor {
-  pub line_bg_color: Hsla,
-  pub char_highlight_color: Hsla,
-  pub gutter_color: Hsla,
-}
-
-#[derive(Clone, Debug)]
-pub struct EditorThemeGit {
-  pub added: EditorThemeGitColor,
-  pub removed: EditorThemeGitColor,
-  pub modified: EditorThemeGitColor,
-}
-
-#[derive(Clone, Debug)]
-pub struct EditorThemeLinesNumber {
-  pub bg_color: Hsla,
-  pub text_color: Hsla,
-}
-
-#[derive(Clone, Debug)]
-pub struct EditorTheme {
-  pub lines_number: EditorThemeLinesNumber,
-  pub git: EditorThemeGit,
-}
-
-#[derive(Clone, Debug)]
-pub struct EditorConfig {
-  pub font_size: f32,
-  pub theme_light: EditorTheme,
-  pub theme_dark: EditorTheme,
-}
-
-impl Default for EditorConfig {
-  fn default() -> Self {
-    let git_theme = EditorThemeGit {
-      added: EditorThemeGitColor {
-        line_bg_color: rgba(0x28a74520).into(),
-        char_highlight_color: rgba(0x28a74560).into(),
-        gutter_color: rgba(0x28a745ff).into(),
-      },
-      removed: EditorThemeGitColor {
-        line_bg_color: rgba(0xd73a4920).into(),
-        char_highlight_color: rgba(0xd73a4960).into(),
-        gutter_color: rgba(0xd73a49ff).into(),
-      },
-      modified: EditorThemeGitColor {
-        line_bg_color: rgba(0xffc10720).into(),
-        char_highlight_color: rgba(0xffc10760).into(),
-        gutter_color: rgba(0xffc107ff).into(),
-      },
-    };
-
-    let lines_number_theme = EditorThemeLinesNumber {
-      bg_color: opaque_grey(0.95, 1.0),
-      text_color: opaque_grey(0.5, 1.0),
-    };
-
-    let light_theme = EditorTheme {
-      lines_number: lines_number_theme.clone(),
-      git: git_theme.clone(),
-    };
-
-    let dark_theme = EditorTheme {
-      lines_number: lines_number_theme,
-      git: git_theme,
-    };
-
-    Self {
-      font_size: 16.0,
-      theme_light: light_theme,
-      theme_dark: dark_theme,
-    }
-  }
-}
-
-impl EditorConfig {
-  pub fn line_height(&self) -> f32 {
-    self.font_size * 1.5
-  }
-
-  fn get_theme(&self, is_dark_mode: bool) -> &EditorTheme {
-    if is_dark_mode {
-      &self.theme_dark
-    } else {
-      &self.theme_light
-    }
-  }
-}
 
 pub struct DiffEditor {
   editor: Editor,
@@ -158,6 +68,14 @@ impl DiffEditor {
       differ,
       dark_mode: false,
     }
+  }
+
+  pub fn toggle_dark_mode(&mut self) {
+    self.dark_mode = !self.dark_mode;
+  }
+
+  pub fn get_theme(&self) -> &EditorTheme {
+    self.config.get_theme(self.dark_mode)
   }
 
   pub fn set_file_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
@@ -326,10 +244,10 @@ impl DiffEditor {
   ) -> impl IntoElement {
     let line_height = self.config.line_height();
     let item_count = diff_lines.len();
-    let theme = self.config.get_theme(self.dark_mode);
+    let theme = self.get_theme();
     let added_gutter_color = theme.git.added.gutter_color;
     let removed_gutter_color = theme.git.removed.gutter_color;
-    let lines_number_bg_color = theme.lines_number.bg_color;
+    let line_numbers_bg_color = theme.line_numbers.bg_color;
 
     uniform_list(
       "diff-gutter",
@@ -343,7 +261,7 @@ impl DiffEditor {
               DiffLineKind::Removed => removed_gutter_color,
               DiffLineKind::Modified if line.line_number == 0 => removed_gutter_color,
               DiffLineKind::Modified => added_gutter_color,
-              DiffLineKind::Unchanged => lines_number_bg_color,
+              DiffLineKind::Unchanged => line_numbers_bg_color,
             };
 
             div().h(px(line_height)).w_full().bg(bg_color)
@@ -362,9 +280,9 @@ impl DiffEditor {
   ) -> impl IntoElement {
     let line_height = self.config.line_height();
     let item_count = diff_lines.len();
-    let theme = self.config.get_theme(self.dark_mode);
-    let lines_number_bg_color = theme.lines_number.bg_color;
-    let lines_number_text_color = theme.lines_number.text_color;
+    let theme = self.get_theme();
+    let line_numbers_bg_color = theme.line_numbers.bg_color;
+    let line_numbers_text_color = theme.line_numbers.text_color;
 
     uniform_list(
       "line-numbers",
@@ -386,14 +304,14 @@ impl DiffEditor {
               .items_end()
               .justify_end()
               .pr_2()
-              .text_color(lines_number_text_color)
+              .text_color(line_numbers_text_color)
               .child(line_num_text)
           })
           .collect::<Vec<_>>()
       },
     )
     .w(px(LINE_NUMBERS_WIDTH))
-    .bg(lines_number_bg_color)
+    .bg(line_numbers_bg_color)
     .track_scroll(scroll_handle)
   }
 
@@ -407,14 +325,19 @@ impl DiffEditor {
     let line_cache = self.line_cache.clone();
     let line_height = self.config.line_height();
     let font_size = self.config.font_size;
+    let theme = self.get_theme();
+    let text_color = theme.code.text_color;
+    let cursor_color = theme.cursor.color;
     let item_count = diff_lines.len();
 
     let line_config = LineConfig {
       font_size,
       line_height,
+      text_color,
+      cursor_color,
     };
 
-    let theme = self.config.get_theme(self.dark_mode);
+    let theme = self.get_theme();
     let added_line_bg_color = theme.git.added.line_bg_color;
     let added_char_highlight_color = theme.git.added.char_highlight_color;
     let removed_line_bg_color = theme.git.removed.line_bg_color;
@@ -659,9 +582,9 @@ impl Render for DiffEditor {
 
     let font_size = self.config.font_size;
     let focus_handle = self.focus_handle.clone();
-    let scroll_handle = self.scroll_handle.clone();
-    let scroll_handle2 = self.scroll_handle.clone();
-    let scroll_handle3 = self.scroll_handle.clone();
+    let scroll_handle_diff_gutter = self.scroll_handle.clone();
+    let scroll_handle_line_numbers = self.scroll_handle.clone();
+    let scroll_handle_editor = self.scroll_handle.clone();
 
     let buffer = Arc::new(self.editor.buffer.clone());
     let editor_state = EditorState {
@@ -673,11 +596,14 @@ impl Render for DiffEditor {
     let diff_lines2 = diff_lines.clone();
     let diff_lines3 = diff_lines.clone();
 
+    let theme = self.get_theme();
+    let bg_color = theme.code.bg_color;
+
     div()
       .id("editor-view")
       .track_focus(&focus_handle)
       .size_full()
-      .bg(white())
+      .bg(bg_color)
       .text_size(px(font_size))
       .on_key_down(cx.listener(Self::on_key_down))
       .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
@@ -688,9 +614,9 @@ impl Render for DiffEditor {
         div()
           .flex()
           .size_full()
-          .child(self.render_diff_gutter(diff_lines, scroll_handle))
-          .child(self.render_line_numbers(diff_lines2, scroll_handle2))
-          .child(self.render_editor(diff_lines3, buffer, editor_state, scroll_handle3)),
+          .child(self.render_diff_gutter(diff_lines, scroll_handle_diff_gutter))
+          .child(self.render_line_numbers(diff_lines2, scroll_handle_line_numbers))
+          .child(self.render_editor(diff_lines3, buffer, editor_state, scroll_handle_editor)),
       )
   }
 }

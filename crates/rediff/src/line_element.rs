@@ -2,8 +2,7 @@ use crate::line_cache::LineCache;
 use editor::CharRange;
 use gpui::{
   App, Bounds, Element, ElementId, Font, GlobalElementId, Hsla, InspectorElementId, IntoElement,
-  LayoutId, Pixels, ShapedLine, Style, TextRun, Window, black, fill, point, px, relative, rgba,
-  size,
+  LayoutId, Pixels, ShapedLine, Style, TextRun, Window, fill, point, px, relative, rgba, size,
 };
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
@@ -32,6 +31,8 @@ pub struct SelectionBounds {
 pub struct LineConfig {
   pub font_size: f32,
   pub line_height: f32,
+  pub text_color: Hsla,
+  pub cursor_color: Hsla,
 }
 
 impl LineConfig {
@@ -112,7 +113,7 @@ impl LineElement {
       let text_run = TextRun {
         len: text.len(),
         font: monospace_font,
-        color: black(),
+        color: self.config.text_color,
         background_color: None,
         underline: None,
         strikethrough: None,
@@ -151,7 +152,7 @@ impl LineElement {
     let text_run = TextRun {
       len: text.len(),
       font: monospace_font,
-      color: black(),
+      color: self.config.text_color,
       background_color: None,
       underline: None,
       strikethrough: None,
@@ -284,6 +285,7 @@ impl Element for LineElement {
     cx: &mut App,
   ) {
     let line_height = self.config.line_height_px();
+    let cursor_color = self.config.cursor_color;
 
     if let Some(ref diff_bg) = self.diff_background {
       let bg_bounds = Bounds::new(bounds.origin, size(bounds.size.width, line_height));
@@ -321,7 +323,7 @@ impl Element for LineElement {
         size(cursor.width, line_height),
       );
 
-      window.paint_quad(fill(cursor_bounds, black()));
+      window.paint_quad(fill(cursor_bounds, cursor_color));
     }
   }
 }
@@ -329,6 +331,7 @@ impl Element for LineElement {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use gpui::blue;
   use text::TextBuffer;
 
   #[test]
@@ -336,6 +339,13 @@ mod tests {
     let config = LineConfig {
       font_size: 16.0,
       line_height: 24.0,
+      text_color: Hsla {
+        h: 0.,
+        s: 0.,
+        l: 0.,
+        a: 1.,
+      },
+      cursor_color: blue(),
     };
     assert_eq!(config.line_height_px(), px(24.0));
   }
@@ -395,6 +405,13 @@ mod tests {
     let config = LineConfig {
       font_size: 16.0,
       line_height: 24.0,
+      text_color: Hsla {
+        h: 0.,
+        s: 0.,
+        l: 0.,
+        a: 1.,
+      },
+      cursor_color: blue(),
     };
 
     let element = LineElement::new(1, Arc::new(buffer), editor_state, cache, config);
@@ -416,6 +433,13 @@ mod tests {
     let config = LineConfig {
       font_size: 16.0,
       line_height: 24.0,
+      text_color: Hsla {
+        h: 0.,
+        s: 0.,
+        l: 0.,
+        a: 1.,
+      },
+      cursor_color: blue(),
     };
 
     let element = LineElement::new(0, Arc::new(buffer), editor_state, cache, config);
@@ -434,6 +458,13 @@ mod tests {
     let config = LineConfig {
       font_size: 14.0,
       line_height: 21.0,
+      text_color: Hsla {
+        h: 0.,
+        s: 0.,
+        l: 0.,
+        a: 1.,
+      },
+      cursor_color: blue(),
     };
 
     let element = LineElement::new(5, Arc::new(buffer), editor_state, cache, config.clone());
