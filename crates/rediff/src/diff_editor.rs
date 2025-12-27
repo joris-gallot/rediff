@@ -2,9 +2,10 @@ use crate::line_cache::LineCache;
 use crate::line_element::{DiffBackground, EditorState, LineConfig, LineElement};
 use editor::{DiffLine, DiffLineKind, Differ, Editor};
 use gpui::{
-  black, div, opaque_grey, prelude::*, px, rgba, uniform_list, white, App, ClipboardItem, Context,
-  FocusHandle, Focusable, Font, Hsla, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-  MouseUpEvent, Pixels, Point, Render, TextRun, UniformListScrollHandle, Window,
+  App, ClipboardItem, Context, FocusHandle, Focusable, Font, Hsla, KeyDownEvent, MouseButton,
+  MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, TextRun,
+  UniformListScrollHandle, Window, black, div, opaque_grey, prelude::*, px, rgba, uniform_list,
+  white,
 };
 use std::ops::Range;
 use std::path::PathBuf;
@@ -40,7 +41,7 @@ pub struct DiffEditor {
   is_selecting: bool,
   selection_anchor: Option<usize>,
   line_cache: Arc<Mutex<LineCache>>,
-  file_path: Option<PathBuf>,
+  file_path: PathBuf,
   is_dirty: bool,
   was_focused: bool,
   compare_content: String,
@@ -49,27 +50,23 @@ pub struct DiffEditor {
 
 impl DiffEditor {
   pub fn new(
-    file_path: Option<PathBuf>,
+    file_path: PathBuf,
     compare_content: String,
     config: Option<EditorConfig>,
     cx: &mut Context<Self>,
   ) -> Self {
     let focus_handle = cx.focus_handle();
 
-    let editor = if let Some(ref path) = file_path {
-      match TextBuffer::from_file(path) {
-        Ok(buffer) => editor::Editor {
-          buffer,
-          cursor: cursor::Cursor::new(),
-          selection: None,
-        },
-        Err(e) => {
-          eprintln!("Failed to load file: {}", e);
-          editor::Editor::new()
-        }
+    let editor = match TextBuffer::from_file(&file_path) {
+      Ok(buffer) => editor::Editor {
+        buffer,
+        cursor: cursor::Cursor::new(),
+        selection: None,
+      },
+      Err(e) => {
+        eprintln!("Failed to load file: {}", e);
+        editor::Editor::new()
       }
-    } else {
-      editor::Editor::new()
     };
 
     let differ = Differ::new(compare_content.clone());
@@ -90,6 +87,11 @@ impl DiffEditor {
     }
   }
 
+  pub fn set_file_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    self.file_path = path;
+    self.reload_file(cx);
+  }
+
   pub fn editor(&mut self) -> &mut Editor {
     &mut self.editor
   }
@@ -108,20 +110,17 @@ impl DiffEditor {
   }
 
   fn reload_file(&mut self, cx: &mut Context<Self>) {
-    if let Some(ref path) = self.file_path {
-      match TextBuffer::from_file(path) {
-        Ok(buffer) => {
-          let cursor_index = self.editor.cursor.index.min(buffer.len());
-          self.editor.buffer = buffer;
-          self.editor.cursor.index = cursor_index;
-          self.editor.selection = None;
-          self.is_dirty = false;
-          println!("File reloaded: {:?}", path);
-          cx.notify();
-        }
-        Err(e) => {
-          eprintln!("Failed to reload file: {}", e);
-        }
+    match TextBuffer::from_file(&self.file_path) {
+      Ok(buffer) => {
+        let cursor_index = self.editor.cursor.index.min(buffer.len());
+        self.editor.buffer = buffer;
+        self.editor.cursor.index = cursor_index;
+        self.editor.selection = None;
+        self.is_dirty = false;
+        cx.notify();
+      }
+      Err(e) => {
+        eprintln!("Failed to reload file: {}", e);
       }
     }
   }
@@ -425,21 +424,16 @@ impl DiffEditor {
     let alt = event.keystroke.modifiers.alt;
 
     match event.keystroke.key.as_str() {
-      "s" if cmd && !shift && !alt => {
-        if let Some(ref path) = self.file_path {
-          match self.editor.buffer.save_to_file(path) {
-            Ok(_) => {
-              self.is_dirty = false;
-              println!("File saved: {:?}", path);
-              cx.notify();
-            }
-            Err(e) => {
-              eprintln!("Failed to save file: {}", e);
-            }
-          }
+      "s" if cmd && !shift && !alt => match self.editor.buffer.save_to_file(&self.file_path) {
+        Ok(_) => {
+          self.is_dirty = false;
+          println!("File saved: {:?}", self.file_path);
+          cx.notify();
         }
-        return;
-      }
+        Err(e) => {
+          eprintln!("Failed to save file: {}", e);
+        }
+      },
       "left" => {
         if cmd && shift {
           self.editor.extend_selection_to_line_start();
