@@ -6,3 +6,4 @@ edition.workspace = true
 [dependencies]
 text = { workspace = true }
 cursor = { workspace = true }
+similar = { workspace = true }

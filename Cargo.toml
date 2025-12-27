@@ -15,6 +15,7 @@ edition = "2024"
 [workspace.dependencies]
 gpui = { version = "*" }
 ropey = "1.6"
+similar = "2.7.0"
 
 # Internal crates
 text = { path = "crates/text" }

@@ -1,10 +1,11 @@
 use crate::line_cache::LineCache;
-use crate::line_element::{EditorState, LineConfig, LineElement};
-use editor::Editor;
+use crate::line_element::{DiffBackground, EditorState, LineConfig, LineElement};
+use editor::{DiffLine, DiffLineKind, Differ, Editor};
 use gpui::{
-  App, ClipboardItem, Context, FocusHandle, Focusable, Font, KeyDownEvent, MouseButton,
+  App, ClipboardItem, Context, FocusHandle, Focusable, Font, Hsla, KeyDownEvent, MouseButton,
   MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, TextRun,
-  UniformListScrollHandle, Window, black, div, opaque_grey, prelude::*, px, uniform_list, white,
+  UniformListScrollHandle, Window, black, div, opaque_grey, prelude::*, px, rgba, uniform_list,
+  white,
 };
 use std::ops::Range;
 use std::path::PathBuf;
@@ -12,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use text::TextBuffer;
 
 const LINE_NUMBERS_WIDTH: f32 = 60.0;
+const DIFF_GUTTER_WIDTH: f32 = 8.0;
 const EDITOR_PADDING: f32 = 8.0;
 
 #[derive(Clone, Debug)]
@@ -42,11 +44,14 @@ pub struct DiffEditorView {
   file_path: Option<PathBuf>,
   is_dirty: bool,
   was_focused: bool,
+  compare_content: String,
+  differ: Differ,
 }
 
 impl DiffEditorView {
   pub fn new(
     file_path: Option<PathBuf>,
+    compare_content: String,
     config: Option<EditorConfig>,
     cx: &mut Context<Self>,
   ) -> Self {
@@ -68,6 +73,8 @@ impl DiffEditorView {
       editor::Editor::new()
     };
 
+    let differ = Differ::new(compare_content.clone());
+
     Self {
       editor,
       focus_handle,
@@ -79,11 +86,22 @@ impl DiffEditorView {
       file_path,
       is_dirty: false,
       was_focused: false,
+      compare_content,
+      differ,
     }
   }
 
   pub fn editor(&mut self) -> &mut Editor {
     &mut self.editor
+  }
+
+  fn compute_diff(&self) -> Vec<DiffLine> {
+    self.differ.compute_diff(&self.editor.buffer.as_str())
+  }
+
+  pub fn update_compare_content(&mut self, content: String) {
+    self.compare_content = content.clone();
+    self.differ = Differ::new(content);
   }
 
   fn mark_dirty(&mut self) {
@@ -111,19 +129,33 @@ impl DiffEditorView {
 
   fn calculate_index_from_position(&self, mouse_pos: Point<Pixels>, window: &mut Window) -> usize {
     let line_height = px(self.config.line_height());
-    let line_numbers_width = px(LINE_NUMBERS_WIDTH);
+    let line_numbers_width = px(LINE_NUMBERS_WIDTH + DIFF_GUTTER_WIDTH);
     let padding = px(EDITOR_PADDING);
 
-    let clicked_line = (mouse_pos.y / line_height).floor() as usize;
+    let clicked_visual_line = (mouse_pos.y / line_height).floor() as usize;
 
+    let diff_lines = self.compute_diff();
+
+    if clicked_visual_line >= diff_lines.len() {
+      return self.editor.buffer.len();
+    }
+
+    let diff_line = &diff_lines[clicked_visual_line];
+
+    // If clicking on a removed line (no line number), ignore the click
+    if diff_line.line_number == 0 {
+      return self.editor.cursor.index;
+    }
+
+    let buffer_line_idx = diff_line.line_number - 1;
     let buffer = &self.editor.buffer;
 
-    if clicked_line >= buffer.line_count() {
+    if buffer_line_idx >= buffer.line_count() {
       return buffer.len();
     }
 
     let text = buffer
-      .line(clicked_line)
+      .line(buffer_line_idx)
       .unwrap_or_default()
       .trim_end_matches('\n')
       .to_string();
@@ -154,12 +186,12 @@ impl DiffEditorView {
     let col = shaped_line.closest_index_for_x(relative_x);
 
     let mut offset = 0;
-    for i in 0..clicked_line {
+    for i in 0..buffer_line_idx {
       if let Some(line) = buffer.line(i) {
         offset += line.len();
       }
     }
-    offset += col.min(buffer.line(clicked_line).unwrap_or_default().len());
+    offset += col.min(buffer.line(buffer_line_idx).unwrap_or_default().len());
     offset.min(buffer.len())
   }
 
@@ -216,19 +248,59 @@ impl DiffEditorView {
     self.selection_anchor = None;
   }
 
-  fn render_line_numbers(
+  fn render_diff_gutter(
     &self,
-    line_count: usize,
+    diff_lines: Vec<DiffLine>,
     scroll_handle: UniformListScrollHandle,
   ) -> impl IntoElement {
     let line_height = self.config.line_height();
+    let item_count = diff_lines.len();
+
+    uniform_list(
+      "diff-gutter",
+      item_count,
+      move |range: Range<usize>, _window, _cx| {
+        range
+          .map(|idx| {
+            let line = &diff_lines[idx];
+            let bg_color: Hsla = match line.kind {
+              DiffLineKind::Added => rgba(0x28a745ff).into(),
+              DiffLineKind::Removed => rgba(0xd73a49ff).into(),
+              DiffLineKind::Modified if line.line_number == 0 => rgba(0xd73a49ff).into(),
+              DiffLineKind::Modified => rgba(0x28a745ff).into(),
+              DiffLineKind::Unchanged => opaque_grey(0.95, 1.0),
+            };
+
+            div().h(px(line_height)).w_full().bg(bg_color)
+          })
+          .collect::<Vec<_>>()
+      },
+    )
+    .w(px(DIFF_GUTTER_WIDTH))
+    .track_scroll(scroll_handle)
+  }
+
+  fn render_line_numbers(
+    &self,
+    diff_lines: Vec<DiffLine>,
+    scroll_handle: UniformListScrollHandle,
+  ) -> impl IntoElement {
+    let line_height = self.config.line_height();
+    let item_count = diff_lines.len();
 
     uniform_list(
       "line-numbers",
-      line_count,
+      item_count,
       move |range: Range<usize>, _window, _cx| {
         range
-          .map(|line_idx| {
+          .map(|idx| {
+            let line = &diff_lines[idx];
+            let line_num_text = if line.line_number == 0 {
+              "".to_string()
+            } else {
+              line.line_number.to_string()
+            };
+
             div()
               .w(px(LINE_NUMBERS_WIDTH))
               .h(px(line_height))
@@ -237,7 +309,7 @@ impl DiffEditorView {
               .justify_end()
               .pr_2()
               .text_color(opaque_grey(0.5, 1.0))
-              .child((line_idx + 1).to_string())
+              .child(line_num_text)
           })
           .collect::<Vec<_>>()
       },
@@ -249,7 +321,7 @@ impl DiffEditorView {
 
   fn render_editor(
     &self,
-    line_count: usize,
+    diff_lines: Vec<DiffLine>,
     buffer: Arc<TextBuffer>,
     editor_state: EditorState,
     scroll_handle: UniformListScrollHandle,
@@ -257,6 +329,7 @@ impl DiffEditorView {
     let line_cache = self.line_cache.clone();
     let line_height = self.config.line_height();
     let font_size = self.config.font_size;
+    let item_count = diff_lines.len();
 
     let line_config = LineConfig {
       font_size,
@@ -265,17 +338,79 @@ impl DiffEditorView {
 
     uniform_list(
       "editor-lines",
-      line_count,
+      item_count,
       move |range: Range<usize>, _window, _cx| {
         range
-          .map(|line_idx| {
-            LineElement::new(
+          .map(|idx| {
+            let line = &diff_lines[idx];
+
+            // For removed/modified lines without line number, don't show cursor
+            // Use an impossible line_idx so the cursor won't be calculated for this line
+            let line_idx = if line.line_number == 0 {
+              usize::MAX
+            } else {
+              line.line_number - 1
+            };
+
+            // Create a modified editor_state that hides cursor on removed lines
+            let modified_editor_state = if line.line_number == 0 {
+              // Hide cursor by setting it to an impossible position
+              EditorState {
+                cursor_index: usize::MAX,
+                selection_range: editor_state.selection_range.clone(),
+              }
+            } else {
+              editor_state.clone()
+            };
+
+            // For removed lines, use text override since they're not in the buffer
+            let text_override = match line.kind {
+              DiffLineKind::Removed => Some(line.content.clone()),
+              DiffLineKind::Modified if line.line_number == 0 => Some(line.content.clone()),
+              _ => None,
+            };
+
+            let diff_bg = match line.kind {
+              DiffLineKind::Added => Some(DiffBackground {
+                color: rgba(0x28a74520).into(),
+                char_highlights: line.char_changes.clone(),
+                highlight_color: rgba(0x28a74560).into(),
+              }),
+              DiffLineKind::Removed => Some(DiffBackground {
+                color: rgba(0xd73a4920).into(),
+                char_highlights: line.char_changes.clone(),
+                highlight_color: rgba(0xd73a4960).into(),
+              }),
+              DiffLineKind::Modified if line.line_number == 0 => Some(DiffBackground {
+                color: rgba(0xd73a4920).into(),
+                char_highlights: line.char_changes.clone(),
+                highlight_color: rgba(0xd73a4960).into(),
+              }),
+              DiffLineKind::Modified => Some(DiffBackground {
+                color: rgba(0x28a74520).into(),
+                char_highlights: line.char_changes.clone(),
+                highlight_color: rgba(0x28a74560).into(),
+              }),
+              DiffLineKind::Unchanged => None,
+            };
+
+            let mut element = LineElement::new(
               line_idx,
               buffer.clone(),
-              editor_state.clone(),
+              modified_editor_state,
               line_cache.clone(),
               line_config.clone(),
-            )
+            );
+
+            if let Some(text) = text_override {
+              element = element.with_text_override(text);
+            }
+
+            if let Some(bg) = diff_bg {
+              element = element.with_diff_background(bg);
+            }
+
+            element
           })
           .collect::<Vec<_>>()
       },
@@ -442,17 +577,21 @@ impl Render for DiffEditorView {
     }
     self.was_focused = is_focused;
 
-    let line_count = self.editor.buffer.line_count();
     let font_size = self.config.font_size;
     let focus_handle = self.focus_handle.clone();
     let scroll_handle = self.scroll_handle.clone();
     let scroll_handle2 = self.scroll_handle.clone();
+    let scroll_handle3 = self.scroll_handle.clone();
 
     let buffer = Arc::new(self.editor.buffer.clone());
     let editor_state = EditorState {
       cursor_index: self.editor.cursor.index,
       selection_range: self.editor.selection_range(),
     };
+
+    let diff_lines = self.compute_diff();
+    let diff_lines2 = diff_lines.clone();
+    let diff_lines3 = diff_lines.clone();
 
     div()
       .id("editor-view")
@@ -469,8 +608,9 @@ impl Render for DiffEditorView {
         div()
           .flex()
           .size_full()
-          .child(self.render_line_numbers(line_count, scroll_handle))
-          .child(self.render_editor(line_count, buffer, editor_state, scroll_handle2)),
+          .child(self.render_diff_gutter(diff_lines, scroll_handle))
+          .child(self.render_line_numbers(diff_lines2, scroll_handle2))
+          .child(self.render_editor(diff_lines3, buffer, editor_state, scroll_handle3)),
       )
   }
 }

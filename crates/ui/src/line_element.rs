@@ -1,4 +1,5 @@
 use crate::line_cache::LineCache;
+use editor::CharRange;
 use gpui::{
   App, Bounds, Element, ElementId, Font, GlobalElementId, Hsla, InspectorElementId, IntoElement,
   LayoutId, Pixels, ShapedLine, Style, TextRun, Window, black, fill, point, px, relative, rgba,
@@ -45,6 +46,13 @@ pub struct EditorState {
   pub selection_range: Option<Range<usize>>,
 }
 
+#[derive(Clone, Debug)]
+pub struct DiffBackground {
+  pub color: Hsla,
+  pub char_highlights: Vec<CharRange>,
+  pub highlight_color: Hsla,
+}
+
 /// Custom element for rendering an editor line
 /// Uses Element trait for direct GPU rendering
 pub struct LineElement {
@@ -53,6 +61,8 @@ pub struct LineElement {
   editor_state: EditorState,
   line_cache: Arc<Mutex<LineCache>>,
   config: LineConfig,
+  diff_background: Option<DiffBackground>,
+  text_override: Option<String>,
 }
 
 impl LineElement {
@@ -69,11 +79,50 @@ impl LineElement {
       editor_state,
       line_cache,
       config,
+      diff_background: None,
+      text_override: None,
     }
+  }
+
+  pub fn with_diff_background(mut self, diff_background: DiffBackground) -> Self {
+    self.diff_background = Some(diff_background);
+    self
+  }
+
+  pub fn with_text_override(mut self, text: String) -> Self {
+    self.text_override = Some(text);
+    self
   }
 
   /// Retrieves or shapes a line from the buffer
   fn get_or_shape_line(&self, window: &mut Window) -> ShapedLine {
+    // If we have a text override, skip cache and shape directly
+    if let Some(ref text_override) = self.text_override {
+      let text = text_override.trim_end_matches('\n').to_string();
+
+      let font_size = px(self.config.font_size);
+      let monospace_font = Font {
+        family: "monospace".into(),
+        features: Default::default(),
+        fallbacks: Default::default(),
+        weight: Default::default(),
+        style: Default::default(),
+      };
+
+      let text_run = TextRun {
+        len: text.len(),
+        font: monospace_font,
+        color: black(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+      };
+
+      return window
+        .text_system()
+        .shape_line(text.into(), font_size, &[text_run], None);
+    }
+
     let mut cache = self.line_cache.lock().unwrap();
 
     let current_version = self.buffer.len();
@@ -235,6 +284,22 @@ impl Element for LineElement {
     cx: &mut App,
   ) {
     let line_height = self.config.line_height_px();
+
+    if let Some(ref diff_bg) = self.diff_background {
+      let bg_bounds = Bounds::new(bounds.origin, size(bounds.size.width, line_height));
+      window.paint_quad(fill(bg_bounds, diff_bg.color));
+
+      // Paint intra-line character highlights
+      for char_range in &diff_bg.char_highlights {
+        let x_start = prepaint.shaped_line.x_for_index(char_range.start);
+        let x_end = prepaint.shaped_line.x_for_index(char_range.end);
+        let highlight_bounds = Bounds::new(
+          point(bounds.origin.x + x_start, bounds.origin.y),
+          size(x_end - x_start, line_height),
+        );
+        window.paint_quad(fill(highlight_bounds, diff_bg.highlight_color));
+      }
+    }
 
     for selection in &prepaint.selection_bounds {
       let selection_bounds = Bounds::new(
