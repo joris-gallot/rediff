@@ -56,10 +56,6 @@ impl Workspace {
     cx.quit();
   }
 
-  pub fn register(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
-  }
-
   fn set_file_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
     self.current_file_path = path.clone();
     self.editor.update(cx, |editor, cx| {
@@ -67,7 +63,7 @@ impl Workspace {
     });
   }
 
-  pub fn render_files_panel(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+  fn render_files_panel(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
     div()
       .w(px(200.0))
       .border_r_1()
@@ -107,6 +103,10 @@ impl Workspace {
               .unwrap_or_else(|| "Unnamed".to_string()),
           )
       }))
+  }
+
+  pub fn register(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
   }
 }
 
