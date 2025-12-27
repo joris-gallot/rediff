@@ -2,10 +2,9 @@ use crate::line_cache::LineCache;
 use crate::line_element::{DiffBackground, EditorState, LineConfig, LineElement};
 use editor::{DiffLine, DiffLineKind, Differ, Editor};
 use gpui::{
-  App, ClipboardItem, Context, FocusHandle, Focusable, Font, Hsla, KeyDownEvent, MouseButton,
-  MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, TextRun,
-  UniformListScrollHandle, Window, black, div, opaque_grey, prelude::*, px, rgba, uniform_list,
-  white,
+  black, div, opaque_grey, prelude::*, px, rgba, uniform_list, white, App, ClipboardItem, Context,
+  FocusHandle, Focusable, Font, Hsla, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+  MouseUpEvent, Pixels, Point, Render, TextRun, UniformListScrollHandle, Window,
 };
 use std::ops::Range;
 use std::path::PathBuf;
@@ -33,7 +32,7 @@ impl EditorConfig {
   }
 }
 
-pub struct DiffEditorView {
+pub struct DiffEditor {
   editor: Editor,
   focus_handle: FocusHandle,
   config: EditorConfig,
@@ -48,7 +47,7 @@ pub struct DiffEditorView {
   differ: Differ,
 }
 
-impl DiffEditorView {
+impl DiffEditor {
   pub fn new(
     file_path: Option<PathBuf>,
     compare_content: String,
@@ -563,13 +562,13 @@ impl DiffEditorView {
   }
 }
 
-impl Focusable for DiffEditorView {
+impl Focusable for DiffEditor {
   fn focus_handle(&self, _cx: &App) -> FocusHandle {
     self.focus_handle.clone()
   }
 }
 
-impl Render for DiffEditorView {
+impl Render for DiffEditor {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let is_focused = self.focus_handle.is_focused(window);
     if is_focused && !self.was_focused && !self.is_dirty {

@@ -4,8 +4,8 @@ members = [
     "crates/text",
     "crates/cursor",
     "crates/editor",
-    "crates/ui",
     "crates/rediff",
+    "crates/playground",
 ]
 
 [workspace.package]
@@ -21,4 +21,4 @@ similar = "2.7.0"
 text = { path = "crates/text" }
 cursor = { path = "crates/cursor" }
 editor = { path = "crates/editor" }
-ui = { path = "crates/ui" }
+rediff = { path = "crates/rediff" }
