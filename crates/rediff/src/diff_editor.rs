@@ -424,6 +424,7 @@ impl DiffEditor {
     )
     .w_full()
     .px(px(EDITOR_PADDING))
+    .cursor_text()
     .track_scroll(scroll_handle)
   }
 
