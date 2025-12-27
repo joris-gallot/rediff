@@ -36,7 +36,11 @@ impl Workspace {
       })
       .unwrap_or_default();
 
-    let first_path = files.first().cloned().unwrap_or_else(|| path.clone());
+    let first_path = if files.is_empty() {
+      panic!("No files found in the provided path");
+    } else {
+      files[0].clone()
+    };
 
     let editor =
       cx.new(|cx| DiffEditor::new(first_path.clone(), compare_content.clone(), config, cx));
