@@ -547,7 +547,8 @@ impl DiffEditor {
           && let Some(c) = key.chars().next()
         {
           self.editor.delete_selection();
-          self.editor.insert_char(c);
+          let char = if shift { c.to_ascii_uppercase() } else { c };
+          self.editor.insert_char(char);
           self.mark_dirty();
         }
       }
