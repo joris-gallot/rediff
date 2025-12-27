@@ -37,7 +37,7 @@ impl Workspace {
       .unwrap_or_default();
 
     let first_path = if files.is_empty() {
-      panic!("No files found in the provided path");
+      panic!("No files found in the provided path: {:?}", path);
     } else {
       files[0].clone()
     };
