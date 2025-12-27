@@ -8,7 +8,6 @@ actions!(playground, [Quit]);
 pub struct Workspace {
   editor: Entity<DiffEditor>,
   files: Vec<PathBuf>,
-  current_file_path: PathBuf,
 }
 
 const GRAY_COLOR: gpui::Hsla = gpui::Hsla {
@@ -45,22 +44,11 @@ impl Workspace {
     let editor =
       cx.new(|cx| DiffEditor::new(first_path.clone(), compare_content.clone(), config, cx));
 
-    Self {
-      editor,
-      files,
-      current_file_path: first_path,
-    }
+    Self { editor, files }
   }
 
   fn quit(&mut self, _: &Quit, _window: &mut Window, cx: &mut Context<Self>) {
     cx.quit();
-  }
-
-  fn set_file_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-    self.current_file_path = path.clone();
-    self.editor.update(cx, |editor, cx| {
-      editor.set_file_path(path, cx);
-    });
   }
 
   fn render_files_panel(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -89,10 +77,12 @@ impl Workspace {
           .py(px(2.0))
           .text_color(rgb(0x333333))
           .on_click(cx.listener(move |this, _e, _w, cx| {
-            this.set_file_path(path_clone.clone(), cx);
+            this.editor.update(cx, |editor, cx| {
+              editor.set_file_path(path_clone.clone(), cx);
+            });
           }))
           .when_else(
-            self.current_file_path == *path,
+            self.editor.as_mut(cx).file_path == *path,
             |d| d.bg(GRAY_COLOR),
             |d| d.hover(|this| this.bg(rgb(0xf5f5f5))),
           )

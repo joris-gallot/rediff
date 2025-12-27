@@ -41,7 +41,7 @@ pub struct DiffEditor {
   is_selecting: bool,
   selection_anchor: Option<usize>,
   line_cache: Arc<Mutex<LineCache>>,
-  file_path: PathBuf,
+  pub file_path: PathBuf,
   is_dirty: bool,
   compare_content: String,
   differ: Differ,
