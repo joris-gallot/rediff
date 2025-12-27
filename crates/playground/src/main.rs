@@ -6,7 +6,7 @@ use workspace::Workspace;
 
 fn main() {
   Application::new().run(|cx: &mut App| {
-    let bounds = Bounds::centered(None, size(px(500.), px(500.0)), cx);
+    let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
 
     Workspace::register(cx);
 
