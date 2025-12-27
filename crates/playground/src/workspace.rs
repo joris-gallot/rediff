@@ -21,7 +21,7 @@ impl Workspace {
   pub fn new(
     path: PathBuf,
     compare_content: String,
-    config: Option<EditorConfig>,
+    config: EditorConfig,
     cx: &mut Context<Self>,
   ) -> Self {
     let files: Vec<PathBuf> = std::fs::read_dir(&path)

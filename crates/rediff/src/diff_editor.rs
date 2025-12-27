@@ -17,19 +17,92 @@ const DIFF_GUTTER_WIDTH: f32 = 8.0;
 const EDITOR_PADDING: f32 = 8.0;
 
 #[derive(Clone, Debug)]
+pub struct EditorThemeGitColor {
+  pub line_bg_color: Hsla,
+  pub char_highlight_color: Hsla,
+  pub gutter_color: Hsla,
+}
+
+#[derive(Clone, Debug)]
+pub struct EditorThemeGit {
+  pub added: EditorThemeGitColor,
+  pub removed: EditorThemeGitColor,
+  pub modified: EditorThemeGitColor,
+}
+
+#[derive(Clone, Debug)]
+pub struct EditorThemeLinesNumber {
+  pub bg_color: Hsla,
+  pub text_color: Hsla,
+}
+
+#[derive(Clone, Debug)]
+pub struct EditorTheme {
+  pub lines_number: EditorThemeLinesNumber,
+  pub git: EditorThemeGit,
+}
+
+#[derive(Clone, Debug)]
 pub struct EditorConfig {
   pub font_size: f32,
+  pub theme_light: EditorTheme,
+  pub theme_dark: EditorTheme,
 }
 
 impl Default for EditorConfig {
   fn default() -> Self {
-    Self { font_size: 16.0 }
+    let git_theme = EditorThemeGit {
+      added: EditorThemeGitColor {
+        line_bg_color: rgba(0x28a74520).into(),
+        char_highlight_color: rgba(0x28a74560).into(),
+        gutter_color: rgba(0x28a745ff).into(),
+      },
+      removed: EditorThemeGitColor {
+        line_bg_color: rgba(0xd73a4920).into(),
+        char_highlight_color: rgba(0xd73a4960).into(),
+        gutter_color: rgba(0xd73a49ff).into(),
+      },
+      modified: EditorThemeGitColor {
+        line_bg_color: rgba(0xffc10720).into(),
+        char_highlight_color: rgba(0xffc10760).into(),
+        gutter_color: rgba(0xffc107ff).into(),
+      },
+    };
+
+    let lines_number_theme = EditorThemeLinesNumber {
+      bg_color: opaque_grey(0.95, 1.0),
+      text_color: opaque_grey(0.5, 1.0),
+    };
+
+    let light_theme = EditorTheme {
+      lines_number: lines_number_theme.clone(),
+      git: git_theme.clone(),
+    };
+
+    let dark_theme = EditorTheme {
+      lines_number: lines_number_theme,
+      git: git_theme,
+    };
+
+    Self {
+      font_size: 16.0,
+      theme_light: light_theme,
+      theme_dark: dark_theme,
+    }
   }
 }
 
 impl EditorConfig {
   pub fn line_height(&self) -> f32 {
     self.font_size * 1.5
+  }
+
+  fn get_theme(&self, is_dark_mode: bool) -> &EditorTheme {
+    if is_dark_mode {
+      &self.theme_dark
+    } else {
+      &self.theme_light
+    }
   }
 }
 
@@ -45,13 +118,14 @@ pub struct DiffEditor {
   is_dirty: bool,
   compare_content: String,
   differ: Differ,
+  dark_mode: bool,
 }
 
 impl DiffEditor {
   pub fn new(
     file_path: PathBuf,
     compare_content: String,
-    config: Option<EditorConfig>,
+    config: EditorConfig,
     cx: &mut Context<Self>,
   ) -> Self {
     let focus_handle = cx.focus_handle();
@@ -73,7 +147,7 @@ impl DiffEditor {
     Self {
       editor,
       focus_handle,
-      config: config.unwrap_or_default(),
+      config,
       scroll_handle: UniformListScrollHandle::new(),
       is_selecting: false,
       selection_anchor: None,
@@ -82,6 +156,7 @@ impl DiffEditor {
       is_dirty: false,
       compare_content,
       differ,
+      dark_mode: false,
     }
   }
 
@@ -251,6 +326,10 @@ impl DiffEditor {
   ) -> impl IntoElement {
     let line_height = self.config.line_height();
     let item_count = diff_lines.len();
+    let theme = self.config.get_theme(self.dark_mode);
+    let added_gutter_color = theme.git.added.gutter_color;
+    let removed_gutter_color = theme.git.removed.gutter_color;
+    let lines_number_bg_color = theme.lines_number.bg_color;
 
     uniform_list(
       "diff-gutter",
@@ -260,11 +339,11 @@ impl DiffEditor {
           .map(|idx| {
             let line = &diff_lines[idx];
             let bg_color: Hsla = match line.kind {
-              DiffLineKind::Added => rgba(0x28a745ff).into(),
-              DiffLineKind::Removed => rgba(0xd73a49ff).into(),
-              DiffLineKind::Modified if line.line_number == 0 => rgba(0xd73a49ff).into(),
-              DiffLineKind::Modified => rgba(0x28a745ff).into(),
-              DiffLineKind::Unchanged => opaque_grey(0.95, 1.0),
+              DiffLineKind::Added => added_gutter_color,
+              DiffLineKind::Removed => removed_gutter_color,
+              DiffLineKind::Modified if line.line_number == 0 => removed_gutter_color,
+              DiffLineKind::Modified => added_gutter_color,
+              DiffLineKind::Unchanged => lines_number_bg_color,
             };
 
             div().h(px(line_height)).w_full().bg(bg_color)
@@ -283,6 +362,9 @@ impl DiffEditor {
   ) -> impl IntoElement {
     let line_height = self.config.line_height();
     let item_count = diff_lines.len();
+    let theme = self.config.get_theme(self.dark_mode);
+    let lines_number_bg_color = theme.lines_number.bg_color;
+    let lines_number_text_color = theme.lines_number.text_color;
 
     uniform_list(
       "line-numbers",
@@ -304,14 +386,14 @@ impl DiffEditor {
               .items_end()
               .justify_end()
               .pr_2()
-              .text_color(opaque_grey(0.5, 1.0))
+              .text_color(lines_number_text_color)
               .child(line_num_text)
           })
           .collect::<Vec<_>>()
       },
     )
     .w(px(LINE_NUMBERS_WIDTH))
-    .bg(opaque_grey(0.95, 1.0))
+    .bg(lines_number_bg_color)
     .track_scroll(scroll_handle)
   }
 
@@ -331,6 +413,12 @@ impl DiffEditor {
       font_size,
       line_height,
     };
+
+    let theme = self.config.get_theme(self.dark_mode);
+    let added_line_bg_color = theme.git.added.line_bg_color;
+    let added_char_highlight_color = theme.git.added.char_highlight_color;
+    let removed_line_bg_color = theme.git.removed.line_bg_color;
+    let removed_char_highlight_color = theme.git.removed.char_highlight_color;
 
     uniform_list(
       "editor-lines",
@@ -368,24 +456,24 @@ impl DiffEditor {
 
             let diff_bg = match line.kind {
               DiffLineKind::Added => Some(DiffBackground {
-                color: rgba(0x28a74520).into(),
+                color: added_line_bg_color,
                 char_highlights: line.char_changes.clone(),
-                highlight_color: rgba(0x28a74560).into(),
+                highlight_color: added_char_highlight_color,
               }),
               DiffLineKind::Removed => Some(DiffBackground {
-                color: rgba(0xd73a4920).into(),
+                color: removed_line_bg_color,
                 char_highlights: line.char_changes.clone(),
-                highlight_color: rgba(0xd73a4960).into(),
+                highlight_color: removed_char_highlight_color,
               }),
               DiffLineKind::Modified if line.line_number == 0 => Some(DiffBackground {
-                color: rgba(0xd73a4920).into(),
+                color: removed_line_bg_color,
                 char_highlights: line.char_changes.clone(),
-                highlight_color: rgba(0xd73a4960).into(),
+                highlight_color: removed_char_highlight_color,
               }),
               DiffLineKind::Modified => Some(DiffBackground {
-                color: rgba(0x28a74520).into(),
+                color: added_line_bg_color,
                 char_highlights: line.char_changes.clone(),
-                highlight_color: rgba(0x28a74560).into(),
+                highlight_color: added_char_highlight_color,
               }),
               DiffLineKind::Unchanged => None,
             };
@@ -619,10 +707,16 @@ mod tests {
 
   #[test]
   fn test_editor_config_line_height() {
-    let config = EditorConfig { font_size: 16.0 };
+    let config = EditorConfig {
+      font_size: 16.0,
+      ..Default::default()
+    };
     assert_eq!(config.line_height(), 24.0);
 
-    let config = EditorConfig { font_size: 20.0 };
+    let config = EditorConfig {
+      font_size: 20.0,
+      ..Default::default()
+    };
     assert_eq!(config.line_height(), 30.0);
   }
 
