@@ -432,6 +432,7 @@ impl DiffEditor {
     let shift = event.keystroke.modifiers.shift;
     let cmd = event.keystroke.modifiers.platform;
     let alt = event.keystroke.modifiers.alt;
+    let config = &self.config;
 
     match event.keystroke.key.as_str() {
       "s" if cmd && !shift && !alt => match self.editor.buffer.save_to_file(&self.file_path) {
@@ -548,6 +549,13 @@ impl DiffEditor {
       "space" => {
         self.editor.delete_selection();
         self.editor.insert_char(' ');
+        self.mark_dirty();
+      }
+      "tab" => {
+        self.editor.delete_selection();
+        for _ in 0..config.tab_size {
+          self.editor.insert_char(' ');
+        }
         self.mark_dirty();
       }
       key => {

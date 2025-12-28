@@ -37,6 +37,7 @@ pub struct EditorTheme {
 #[derive(Clone, Debug)]
 pub struct EditorConfig {
   pub font_size: f32,
+  pub tab_size: usize,
   pub theme_light: EditorTheme,
   pub theme_dark: EditorTheme,
 }
@@ -45,6 +46,7 @@ impl Default for EditorConfig {
   fn default() -> Self {
     Self {
       font_size: 16.0,
+      tab_size: 2,
       theme_light: Self::default_theme_light(),
       theme_dark: Self::default_theme_dark(),
     }
