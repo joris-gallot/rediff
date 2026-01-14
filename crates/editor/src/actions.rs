@@ -5,12 +5,13 @@
 
 use gpui::{ClipboardItem, Context, EntityInputHandler, Window, actions};
 
-use crate::{boundaries, editor::Editor};
+use crate::{boundaries, editor::{Editor, TAB_WHITESPACE_COUNT}};
 
 actions!(
   editor,
   [
     Enter,
+    Tab,
     Backspace,
     BackspaceWord,
     BackspaceAll,
@@ -52,6 +53,13 @@ pub fn enter(editor: &mut Editor, _: &Enter, window: &mut Window, cx: &mut Conte
   editor.target_column = None;
   editor.replace_text_in_range(None, "\n", window, cx);
 
+  editor.ensure_cursor_visible(window, cx);
+}
+
+pub fn tab(editor: &mut Editor, _: &Tab, window: &mut Window, cx: &mut Context<Editor>) {
+  editor.target_column = None;
+  let tab_text = " ".repeat(TAB_WHITESPACE_COUNT);
+  editor.replace_text_in_range(None, &tab_text, window, cx);
   editor.ensure_cursor_visible(window, cx);
 }
 

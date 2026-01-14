@@ -40,6 +40,8 @@ const EXTRA_EDITOR_WIDTH: f32 = 200.0;
 const MAX_CACHE_SIZE: usize = 200;
 /// Number of lines of padding when auto-scrolling to cursor
 const SCROLL_PADDING: usize = 3;
+/// Number of spaces inserted for a tab
+pub(crate) const TAB_WHITESPACE_COUNT: usize = 2;
 /// Width of the gutter area
 const GUTTER_WIDTH: f32 = 70.0;
 /// Padding inside the editor content area
@@ -670,6 +672,7 @@ impl Render for Editor {
       .cursor(CursorStyle::IBeam)
       .size_full()
       .on_action(cx.listener(crate::actions::enter))
+      .on_action(cx.listener(crate::actions::tab))
       .on_action(cx.listener(crate::actions::backspace))
       .on_action(cx.listener(crate::actions::backspace_word))
       .on_action(cx.listener(crate::actions::backspace_all))
