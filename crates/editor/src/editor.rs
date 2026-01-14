@@ -830,7 +830,6 @@ pub mod tests {
     }
 
     /// Get whether selection is reversed
-    #[allow(dead_code)]
     pub fn selection_reversed(&self) -> bool {
       self
         .editor
