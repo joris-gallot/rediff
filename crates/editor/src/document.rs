@@ -427,6 +427,37 @@ impl Document {
     self.diff_base_lines.is_some()
   }
 
+  // Keep diff line starts in sync for single-line edits between diff recomputes.
+  pub(crate) fn apply_single_line_edit_delta(&mut self, current_line: usize, delta: isize) {
+    if delta == 0 || !self.diff_enabled() {
+      return;
+    }
+    let mut diff_state = self.diff_state.write();
+    let Some(state) = diff_state.as_mut() else {
+      return;
+    };
+    if state.current_to_view.len() != self.buffer.len_lines() {
+      return;
+    }
+    let Some(view_line) = state.current_to_view.get(current_line).copied().flatten() else {
+      return;
+    };
+    let Some(line) = state.lines.get_mut(view_line) else {
+      return;
+    };
+    let old_len = line.len_chars as isize;
+    let new_len = (old_len + delta).max(0);
+    let applied_delta = new_len - old_len;
+    if applied_delta == 0 {
+      return;
+    }
+    line.len_chars = new_len as usize;
+    for start in state.line_starts.iter_mut().skip(view_line + 1) {
+      *start = (*start as isize + applied_delta).max(0) as usize;
+    }
+    state.len_chars = (state.len_chars as isize + applied_delta).max(0) as usize;
+  }
+
   pub fn map_view_line_range_to_current(&self, range: &Range<usize>) -> Option<Range<usize>> {
     let diff_state = self.diff_state.read();
     let state = match diff_state.as_ref() {

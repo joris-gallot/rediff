@@ -463,6 +463,10 @@ impl EntityInputHandler for Editor {
     self.cursor_blink.update(cx, |blink, cx| {
       blink.pause_blinking(cx);
     });
+    // Keep selection aligned with the latest diff state before mapping to buffer.
+    self.sync_view_selection_from_buffer(cx);
+    let has_newline = new_text.contains('\n');
+    let new_text_chars = new_text.chars().count();
     let range = range_utf16
       .as_ref()
       .map(|range_utf16| self.range_from_utf16(range_utf16, cx))
@@ -484,11 +488,21 @@ impl EntityInputHandler for Editor {
       return;
     }
     let buffer_range = buffer_range.unwrap_or_else(|| range.clone());
+    let buffer_range_len = buffer_range.end - buffer_range.start;
+    let (buffer_start_line, buffer_end_line) = {
+      let doc = self.document.read(cx);
+      (
+        doc.buffer.char_to_line(buffer_range.start),
+        doc.buffer.char_to_line(buffer_range.end),
+      )
+    };
+    let single_line_edit = !has_newline && buffer_start_line == buffer_end_line;
+    let delta_chars = new_text_chars as isize - buffer_range_len as isize;
 
     let line_height = window.line_height();
     let viewport_height = self.viewport_height;
     let scroll_offset_y = self.scroll_offset_y;
-    let new_line_count = new_text.matches('\n').count();
+    let new_line_count = if has_newline { new_text.matches('\n').count() } else { 0 };
     let force_end_line = start_line.saturating_add(new_line_count).max(end_line);
     let force_range = start_line..(force_end_line + 1);
     let force_range = {
@@ -505,6 +519,9 @@ impl EntityInputHandler for Editor {
       let id = doc.buffer.transaction(Instant::now(), |buffer, tx| {
         buffer.replace(tx, buffer_range, new_text);
       });
+      if single_line_edit {
+        doc.apply_single_line_edit_delta(buffer_start_line, delta_chars);
+      }
 
       // Trigger async syntax re-highlighting with debouncing
       doc.schedule_recompute_highlights(cx);
@@ -530,8 +547,6 @@ impl EntityInputHandler for Editor {
       id
     });
 
-    let has_newline = new_text.contains('\n');
-
     if has_newline || start_line != end_line {
       // Multi-line edit: invalidate from start line onwards
       self.invalidate_lines_from(start_line);
@@ -540,7 +555,6 @@ impl EntityInputHandler for Editor {
       self.invalidate_line(start_line);
     }
 
-    let new_text_chars = new_text.chars().count();
     let new_cursor_offset = buffer_range.start + new_text_chars;
     self.selected_range = range.start + new_text_chars..range.start + new_text_chars;
     self.selected_range_buffer = Some(new_cursor_offset..new_cursor_offset);
@@ -565,6 +579,10 @@ impl EntityInputHandler for Editor {
     self.cursor_blink.update(cx, |blink, cx| {
       blink.pause_blinking(cx);
     });
+    // Keep selection aligned with the latest diff state before mapping to buffer.
+    self.sync_view_selection_from_buffer(cx);
+    let has_newline = new_text.contains('\n');
+    let new_text_chars = new_text.chars().count();
     let range = range_utf16
       .as_ref()
       .map(|range_utf16| self.range_from_utf16(range_utf16, cx))
@@ -583,12 +601,23 @@ impl EntityInputHandler for Editor {
       cx.notify();
       return;
     }
+    let buffer_range = buffer_range.unwrap_or_else(|| range.clone());
+    let buffer_range_len = buffer_range.end - buffer_range.start;
+    let (buffer_start_line, buffer_end_line) = {
+      let doc = self.document.read(cx);
+      (
+        doc.buffer.char_to_line(buffer_range.start),
+        doc.buffer.char_to_line(buffer_range.end),
+      )
+    };
+    let single_line_edit = !has_newline && buffer_start_line == buffer_end_line;
+    let delta_chars = new_text_chars as isize - buffer_range_len as isize;
 
     let line_height = window.line_height();
     let viewport_height = self.viewport_height;
     let scroll_offset_y = self.scroll_offset_y;
     let end_line = self.document.read(cx).char_to_line(range.end);
-    let new_line_count = new_text.matches('\n').count();
+    let new_line_count = if has_newline { new_text.matches('\n').count() } else { 0 };
     let force_end_line = start_line.saturating_add(new_line_count).max(end_line);
     let force_range = start_line..(force_end_line + 1);
     let force_range = {
@@ -601,10 +630,13 @@ impl EntityInputHandler for Editor {
     };
 
     self.document.update(cx, |doc, cx| {
-      let buffer_range = buffer_range.clone().unwrap_or_else(|| range.clone());
+      let buffer_range = buffer_range.clone();
       doc.buffer.transaction(Instant::now(), |buffer, tx| {
         buffer.replace(tx, buffer_range, new_text);
       });
+      if single_line_edit {
+        doc.apply_single_line_edit_delta(buffer_start_line, delta_chars);
+      }
       doc.schedule_recompute_highlights(cx);
       if doc.diff_enabled() {
         doc.schedule_recompute_diff(cx);
@@ -628,7 +660,6 @@ impl EntityInputHandler for Editor {
     // Invalidate cache for all lines from the start of the edit
     self.invalidate_lines_from(start_line);
 
-    let new_text_chars = new_text.chars().count();
     if !new_text.is_empty() {
       self.marked_range = Some(range.start..range.start + new_text_chars);
     } else {
