@@ -1,7 +1,8 @@
 [package]
-name = "cursor"
+name = "buffer"
 version.workspace = true
 edition.workspace = true
+publish.workspace = true
 
 [dependencies]
-text = { workspace = true }
+ropey.workspace = true

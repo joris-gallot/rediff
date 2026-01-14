@@ -1,7 +1,0 @@
-[package]
-name = "text"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-ropey.workspace = true
